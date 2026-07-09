@@ -12,6 +12,7 @@ use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth; // <- Ajouté pour l'authentification
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Models\Agency; // Pensez à importer votre modèle d'agence
 
@@ -24,7 +25,7 @@ class TransferController extends Controller
     public function initiateTransfer(TransferRequest $request)
     {
         // Récupération de l'utilisateur authentifié via Sanctum ou Session
-        $user = Auth::user(); 
+        $user = Auth::user();
 
         if (!$user) {
             return response()->json([
@@ -109,9 +110,11 @@ public function initiateWithdrawal(WithdrawalRequest $request)
     }
 
     // 1. Vérification de l'existence et du statut de l'agence
-    $agency = Agency::where('code', $request->agensic_code)
+/*    $agency = Agency::where('code', $request->agensic_code)
                     ->where('status', 'active') // Optionnel : s'assurer qu'elle n'est pas suspendue
-                    ->first();
+                    ->first();*/
+    $agency = Agency::where('status', 'active') // Optionnel : s'assurer qu'elle n'est pas suspendue
+        ->first();
 
     if (!$agency) {
         return response()->json([
@@ -122,7 +125,7 @@ public function initiateWithdrawal(WithdrawalRequest $request)
 
     $wallet = $user->wallet;
     $amount = (float) $request->amount;
-    $feeCharged = 5.00; 
+    $feeCharged = 5.00;
     $totalDeduction = $amount + $feeCharged;
 
     // 2. [Sécurité Optionnelle] : Vérifier si le portefeuille a un solde suffisant
@@ -173,7 +176,7 @@ public function initiateWithdrawal(WithdrawalRequest $request)
 
     } catch (\Exception $e) {
         DB::rollBack();
-        
+
         // Loggez l'erreur pour le debug interne si nécessaire
         Log::error("Erreur retrait: " . $e->getMessage());
 
@@ -201,7 +204,7 @@ public function initiateWithdrawal(WithdrawalRequest $request)
 
         $wallet = $user->wallet;
         $amount = (float) $request->amount;
-        $feeCharged = 5.00; 
+        $feeCharged = 5.00;
         $totalDeduction = $amount + $feeCharged;
 
         $requestId = 'WD-' . strtoupper(Str::random(12));
@@ -258,7 +261,7 @@ public function initiateWithdrawal(WithdrawalRequest $request)
 
             if (!$user) {
                 return response()->json([
-                    'status'  => 'error', 
+                    'status'  => 'error',
                     'message' => 'Unauthenticated.'
                 ], 401);
             }
@@ -283,6 +286,8 @@ public function initiateWithdrawal(WithdrawalRequest $request)
     /**
      * GET /api/history?page=1&type=all
      * Historique complet filtré par marchand avec pagination
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function historyList(Request $request)
     {
@@ -291,17 +296,17 @@ public function initiateWithdrawal(WithdrawalRequest $request)
 
             if (!$user) {
                 return response()->json([
-                    'status'  => 'error', 
+                    'status'  => 'error',
                     'message' => 'Unauthenticated.'
                 ], 401);
             }
 
             $type = $request->query('type', 'all');
-            
+
             $query = Transaction::where('user_id', $user->id);
-            
-            if ($type !== 'all') { 
-                $query->where('type', $type); 
+
+            if ($type !== 'all') {
+                $query->where('type', $type);
             }
 
             $transactions = $query->latest()->paginate(15);
@@ -320,7 +325,7 @@ public function initiateWithdrawal(WithdrawalRequest $request)
     }
     /**
      * Récupérer le statut actuel d'une transaction pour le polling Flutter.
-     * 
+     *
      * URL: GET /api/transactions/{id}/status
      */
     public function getTransactionStatus(string $id)

@@ -48,4 +48,11 @@ class Transaction extends Model
     {
         return $this->belongsTo(Recipient::class);
     }
+    /**
+     * Obtenir l'agence associée à cette transaction.
+     */
+    public function agency()
+    {
+        return $this->belongsTo(Agency::class, 'agency_id');
+    }
 }
