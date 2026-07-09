@@ -5,7 +5,7 @@ use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\WebhookController;
 use App\Http\Controllers\Api\CountryController;
 use App\Http\Controllers\Api\AuthController;
-
+ use App\Http\Controllers\Api\UserController;
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -30,6 +30,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Si ton application Flutter utilise des Tokens Sanctum, garde cette ligne.
     // Sinon, déplace-la dans le groupe "ApiKey" ci-dessous si le profil dépend uniquement de l'ApiKey.
     Route::get('/profile', [AuthController::class, 'profile']); 
+
+    //Route::get('/profile', [UserController::class, 'getProfile']);
+    Route::post('/profile/update', [UserController::class, 'updateProfile']);
+    Route::post('/profile/update-pin', [UserController::class, 'updateCodePin']);
+    Route::post('/profile/change-password', [UserController::class, 'changePassword']);
+
 });
 
 

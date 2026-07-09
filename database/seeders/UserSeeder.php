@@ -15,12 +15,14 @@ class UserSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Création de l'utilisateur de test principal
+        // 1. Création ou mise à jour forcée de l'utilisateur de test principal
         $user = User::updateOrCreate(
             ['phone' => '657285050'],
             [
                 'name' => 'Lorenzo Mbah',
                 'password' => Hash::make('password'),
+                // Forcé en Bcrypt ici, écrasera définitivement toute valeur brute résiduelle
+                'transaction_pin' => Hash::make('0000'), 
             ]
         );
 
@@ -33,24 +35,28 @@ class UserSeeder extends Seeder
             ]
         );
 
-        // 3. Ajout de bénéficiaires récurrents
-        $recipient1 = Recipient::create([
-            'user_id' => $user->id,
-            'name' => 'Jean Mobile',
-            'phone' => '699887766',
-            'operator' => 'ORANGE',
-            'country_code' => 'CM',
-        ]);
+        // 3. Ajout de bénéficiaires récurrents (sécurisés contre la duplication)
+        $recipient1 = Recipient::firstOrCreate(
+            ['user_id' => $user->id, 'phone' => '699887766'],
+            [
+                'name' => 'Jean Mobile',
+                'operator' => 'ORANGE',
+                'country_code' => 'CM',
+            ]
+        );
 
-        $recipient2 = Recipient::create([
-            'user_id' => $user->id,
-            'name' => 'Idriss Diallo',
-            'phone' => '0707112233',
-            'operator' => 'MTN',
-            'country_code' => 'CI',
-        ]);
+        $recipient2 = Recipient::firstOrCreate(
+            ['user_id' => $user->id, 'phone' => '0707112233'],
+            [
+                'name' => 'Idriss Diallo',
+                'operator' => 'MTN',
+                'country_code' => 'CI',
+            ]
+        );
 
         // 4. Génération d'un historique de transactions diversifié pour l'UI Flutter
+        // On nettoie l'ancien historique de cet utilisateur pour éviter le flood à chaque seed
+        Transaction::where('user_id', $user->id)->delete();
 
         // Transaction 1 : Réussie (Transfert National Orange Money)
         Transaction::create([
@@ -63,7 +69,6 @@ class UserSeeder extends Seeder
             'recipient_phone' => $recipient1->phone,
             'recipient_operator' => $recipient1->operator,
             
-            // Éléments financiers (Frais globaux de 500 : 350 pour nous, 150 pour l'opérateur)
             'amount_sent' => 50000.00,
             'currency_sent' => 'XAF',
             'fees' => 500.00,
@@ -74,7 +79,7 @@ class UserSeeder extends Seeder
             'currency_received' => 'XAF',
             
             'status' => 'success',
-            'ip_address' => '102.244.40.15', // Simule une IP au Cameroun
+            'ip_address' => '102.244.40.15',
             'device_signature' => 'iOS-iPhone15Pro-Build2026',
             'completed_at' => Carbon::now()->subHours(2),
             'created_at' => Carbon::now()->subHours(2)->subMinutes(5),
@@ -91,7 +96,6 @@ class UserSeeder extends Seeder
             'recipient_phone' => $recipient2->phone,
             'recipient_operator' => $recipient2->operator,
             
-            // XAF vers XOF (Parité fixe 1:1, mais frais internationaux un peu plus élevés)
             'amount_sent' => 100000.00,
             'currency_sent' => 'XAF',
             'fees' => 1500.00,
@@ -104,7 +108,7 @@ class UserSeeder extends Seeder
             'status' => 'processing',
             'ip_address' => '102.244.40.15',
             'device_signature' => 'iOS-iPhone15Pro-Build2026',
-            'completed_at' => null, // Toujours nul tant que l'agrégateur n'a pas répondu
+            'completed_at' => null,
             'created_at' => Carbon::now()->subMinutes(15),
         ]);
 
@@ -114,8 +118,8 @@ class UserSeeder extends Seeder
             'gateway_reference' => 'MTN-CM-FAILED-772',
             'type' => 'transfer',
             'user_id' => $user->id,
-            'recipient_id' => null, // Pas lié à un bénéficiaire sauvé
-            'recipient_name' => 'Inconnu MTN', // Saisi manuellement par l'utilisateur
+            'recipient_id' => null,
+            'recipient_name' => 'Inconnu MTN',
             'recipient_phone' => '670112233',
             'recipient_operator' => 'MTN',
             
@@ -123,7 +127,7 @@ class UserSeeder extends Seeder
             'currency_sent' => 'XAF',
             'fees' => 250.00,
             'agent_commission' => 0.00,
-            'gateway_fees' => 0.00, // Souvent 0 si l'opérateur rejette immédiatement sans tarifer
+            'gateway_fees' => 0.00,
             'exchange_rate' => 1.000000,
             'amount_to_receive' => 24750.00,
             'currency_received' => 'XAF',
@@ -141,16 +145,16 @@ class UserSeeder extends Seeder
         Transaction::create([
             'reference' => 'DEP-' . date('Ymd') . '-' . strtoupper(Str::random(6)),
             'gateway_reference' => 'OM-CASHIN-1122',
-            'type' => 'withdrawal', // Changement de type ici
+            'type' => 'withdrawal',
             'user_id' => $user->id,
             'recipient_id' => null,
-            'recipient_name' => $user->name, // C'est lui-même qui reçoit sur son solde de l'appli
+            'recipient_name' => $user->name,
             'recipient_phone' => $user->phone,
             'recipient_operator' => 'ORANGE',
 
             'amount_sent' => 200000.00,
             'currency_sent' => 'XAF',
-            'fees' => 0.00, // Pas de frais sur les dépôts pour inciter l'usage
+            'fees' => 0.00,
             'agent_commission' => 0.00,
             'gateway_fees' => 100.00,
             'exchange_rate' => 1.000000,

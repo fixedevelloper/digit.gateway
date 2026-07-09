@@ -12,9 +12,10 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Support\Facades\Hash;
 
-#[Fillable(['name', 'email', 'password', 'phone', 'api_key', 'currency'])] // <- Ajout de phone, api_key et currency
-#[Hidden(['password', 'remember_token', 'api_key'])] // <- On cache aussi l'api_key des réponses JSON par sécurité
+#[Fillable(['name', 'email', 'password', 'phone', 'transaction_pin', 'currency'])] // <- Ajout de phone, api_key et currency
+#[Hidden(['password', 'remember_token', 'transaction_pin'])] // <- On cache aussi l'api_key des réponses JSON par sécurité
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -30,6 +31,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'transaction_pin' => 'hashed',
         ];
     }
 
@@ -43,6 +45,7 @@ class User extends Authenticatable
             $user->wallet()->create([
                 'balance' => 0.00,
                 'currency' => $user->currency ?? 'XAF',
+               
             ]);
         });
     }

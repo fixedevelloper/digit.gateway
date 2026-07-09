@@ -41,6 +41,7 @@ class AuthController extends Controller
             'name' => $request->name,
             'phone' => $request->phone,
             'password' => Hash::make($request->password),
+             'transaction_pin' => Hash::make('0000')
         ]);
 
         // 3. Initialisation automatique de son portefeuille (Wallet)

@@ -16,6 +16,7 @@ return new class extends Migration
             $table->string('name')->nullable();
             $table->string('phone')->unique();
             $table->string('password');
+             $table->string('transaction_pin');
             $table->rememberToken();
             $table->timestamps();
         });
