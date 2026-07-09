@@ -52,6 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Transactions (Payout & Cash-In)
     Route::post('/transfer', [TransferController::class, 'initiateTransfer']);
     Route::post('/withdrawal', [TransferController::class, 'initiateWithdrawal']);
+     Route::post('/deposit', [TransferController::class, 'initiateDeposit']);
 
     // Vérification de statut et historique
     Route::get('/get_request', [TransferController::class, 'checkStatus']);
