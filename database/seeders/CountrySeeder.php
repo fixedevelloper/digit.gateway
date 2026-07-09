@@ -24,21 +24,14 @@ class CountrySeeder extends Seeder
                 ],
                 'operators' => [
                     [
-                        'name' => 'MTN Congo',
-                        'code' => 'MTN_CG',
+                        'name' => 'RESEAU CHARISMATIQUE',
+                        'code' => 'RESEAU_CHARISMATIQUE',
                         'prefix_regex' => '^(06)', // Les numéros MTN commencent généralement par 06 au Congo
                         'phone_length' => 9,
                         'min_amount' => 100.00,
                         'max_amount' => 500000.00,
-                    ],
-                    [
-                        'name' => 'Airtel Congo',
-                        'code' => 'AIRTEL_CG',
-                        'prefix_regex' => '^(04|05)', // Les numéros Airtel commencent par 04 ou 05
-                        'phone_length' => 9,
-                        'min_amount' => 100.00,
-                        'max_amount' => 500000.00,
                     ]
+            
                 ]
             ],
             [
