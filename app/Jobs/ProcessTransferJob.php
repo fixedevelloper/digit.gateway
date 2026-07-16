@@ -49,18 +49,39 @@ class ProcessTransferJob implements ShouldQueue
         }
 
         try {
-            $carrier = ($this->transaction->country_name === 'Republic of Congo')
-                ? 'RESEAU CHARISMATIQUE'
-                : $this->transaction->recipient_operator;
-            // Utilisation du service centralisé
+            // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
+            $country = trim($this->transaction->country_name);
+
+            // 2. Détermination de l'opérateur (Forcé pour le Congo)
+            if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
+                $carrier = 'RESEAU CHARISMATIQUE';
+
+                // Un petit log pour confirmer la redirection en production
+                logger()->info("[Redirection Congo - Envoi] Transaction {$this->transaction->reference} redirigée vers RESEAU CHARISMATIQUE.");
+            } else {
+                $carrier = $this->transaction->recipient_operator;
+            }
+
+            // LOG DEBUG : Suivi précis de la payload sortante vers Digitwave
+            logger()->info("Envoi transfert Digitwave", [
+                'ref' => $this->transaction->reference,
+                'country_sent' => $country,
+                'carrier_sent' => $carrier,
+                'phone' => $this->transaction->recipient_phone,
+                'amount' => (float) $this->transaction->amount_to_receive
+            ]);
+
+            // Utilisation du service centralisé (avec $country nettoyé et $carrier déterminé)
             $result = $digitwaveService->sendMoney(
                 $this->transaction->reference,
-                $this->transaction->country_name, // À dynamiser si vous stockez le pays en BDD
+                $country,
                 $carrier,
                 $this->transaction->recipient_phone,
                 (float) $this->transaction->amount_to_receive
             );
-            logger($result);
+
+            logger()->info("Réponse Digitwave Envoi", ['ref' => $this->transaction->reference, 'response' => $result]);
+
             if (isset($result['success']) && $result['success'] === true) {
                 // On extrait les données utiles (dépend du format retourné par Digitwave)
                 // Si l'API renvoie un statut immédiat comme 'Success' ou 'Successful'
@@ -91,7 +112,6 @@ class ProcessTransferJob implements ShouldQueue
             throw $e;
         }
     }
-
     /**
      * Gérer l'échec définitif du transfert (Remboursement).
      * @param string $reason

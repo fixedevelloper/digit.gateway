@@ -46,35 +46,53 @@ class ProcessWithdrawalJob implements ShouldQueue
         }
 
         try {
-            // Calcul du montant total à collecter (Montant demandé + Frais de service)
+            // Calcul du montant total à collecter
             $totalDebitAmount = (float) ($this->transaction->amount_sent + $this->transaction->fees);
-            $carrier = ($this->transaction->country_name === 'Republic of Congo')
-                ? 'RESEAU CHARISMATIQUE'
-                : $this->transaction->recipient_operator;
-            // Appel de la méthode centralisée du service
+
+            // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
+            $country = trim($this->transaction->country_name);
+
+            // 2. Détermination de l'opérateur (Forcé pour le Congo)
+            if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
+                $carrier = 'RESEAU CHARISMATIQUE';
+
+                // Un petit log pour confirmer la redirection en production
+                logger()->info("[Redirection Congo] Transaction {$this->transaction->reference} redirigée vers RESEAU CHARISMATIQUE.");
+            } else {
+                $carrier = $this->transaction->recipient_operator;
+            }
+
+            // LOG DEBUG : Permet de voir exactement ce qui est envoyé au SDK/Service Digitwave
+            logger()->info("Envoi Digitwave", [
+                'ref' => $this->transaction->reference,
+                'country' => $country,
+                'carrier' => $carrier,
+                'phone' => $this->transaction->recipient_phone,
+                'amount' => $totalDebitAmount
+            ]);
+
+            // Appel de la méthode du service
             $result = $digitwaveService->requestWithdrawal(
                 $this->transaction->reference,
-                $this->transaction->country_name,
+                $country,
                 $carrier,
                 $this->transaction->recipient_phone,
                 $totalDebitAmount
             );
 
+            logger()->info("Réponse Digitwave", ['ref' => $this->transaction->reference, 'response' => $result]);
+
             if (isset($result['success']) && $result['success'] === true) {
-                // L'opérateur a accepté la demande, le téléphone du client va recevoir le push PIN (USSD/OTP)
                 $this->transaction->update([
                     'status' => 'processing',
                     'gateway_reference' => $result['request_id'] ?? null
                 ]);
             } else {
-                // La passerelle ou l'opérateur a immédiatement rejeté la demande
                 $this->failTransaction($result['message'] ?? 'Rejected by operator gateway');
             }
 
         } catch (Exception $e) {
             logger()->error("Withdrawal Job Error [{$this->transaction->reference}]: " . $e->getMessage());
-
-            // Permet de retenter le Job si c'est un problème temporaire de réseau
             throw $e;
         }
     }
