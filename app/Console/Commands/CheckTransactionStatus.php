@@ -4,75 +4,115 @@ namespace App\Console\Commands;
 
 use App\Services\DigitwaveService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use App\Models\Transaction;
-use Illuminate\Support\Carbon;
+use Exception;
 
 class CheckTransactionStatus extends Command
 {
     /**
-     * Le nom et la signature de la commande en console.
-     * Exemple : php artisan transaction:status WD-12345
+     * Signature de la commande en console.
+     * Exemple : php artisan transaction:status
+     *
+     * @var string
      */
-    protected $signature = 'transaction:status {request_id : L\'identifiant unique de la requête}';
+    protected $signature = 'transaction:status';
 
     /**
      * La description de la commande.
+     *
+     * @var string
      */
-    protected $description = 'Vérifie et met à jour le statut d\'une transaction via l\'API externe';
+    protected $description = 'Vérifie et met à jour en masse le statut de toutes les transactions en attente ou en cours';
 
     /**
      * Exécuter la commande.
+     *
+     * @param DigitwaveService $digitwaveService
+     * @return int
      */
-    public function handle(DigitwaveService $digitwaveService)
+    public function handle(DigitwaveService $digitwaveService): int
     {
-        $requestId = $this->argument('request_id');
+        // 1. Récupérer les transactions éligibles (pending ou processing) ayant une référence passerelle
+        // On traite en priorité les plus anciennes (oldest)
+        $transactions = Transaction::whereIn('status', ['pending', 'processing'])
+            ->whereNotNull('gateway_reference')
+            ->where('gateway_reference', '!=', '')
+            ->oldest()
+            ->get();
 
-        // 1. Trouver la transaction localement
-        $transaction = Transaction::where('reference', $requestId)->first();
+        $count = $transactions->count();
 
-        if (!$transaction) {
-            $this->error("La transaction avec la référence {$requestId} n'existe pas en base de données.");
-            return Command::FAILURE;
-        }
-
-        $this->info("Vérification du statut pour la requête : {$requestId}...");
-
-        // 2. Appel GET à l'API externe avec le Query Mapping
-
-        $result=$digitwaveService->checkStatus($transaction->gateway_reference);
-
-
-
-
-        logger($result);
-        if (isset($result['success']) && $result['success'] === true) {
-            $apiData = $result['data'];
-            $apiStatus = strtolower($apiData['status']); // "success", "pending", "failed"
-
-            // 3. Mise à jour de la base de données selon le statut retourné
-            if ($apiStatus === 'success') {
-                $transaction->update(['status' => 'success']);
-                $this->info("Statut mis à jour avec succès : SUCCESS");
-
-            } elseif ($apiStatus === 'failed') {
-                $transaction->update(['status' => 'failed']);
-
-                // Remboursement si c'est un envoi (TX)
-                if (str_starts_with($transaction->reference, 'TX-')) {
-                    $refundAmount = $transaction->amount_sent + $transaction->fees;
-                    $transaction->user->wallet->increment('balance', $refundAmount);
-                }
-
-                $this->warn("La transaction a échoué côté opérateur. Utilisateur traité.");
-            } else {
-                $this->line("La transaction est toujours en attente (Pending)...");
-            }
-
+        if ($count === 0) {
+            $this->info("✅ Aucune transaction en cours ou en attente à vérifier.");
             return Command::SUCCESS;
         }
 
-        $this->error("L'API a retourné un échec de recherche.");
-        return Command::FAILURE;
+        $this->info("🔍 {$count} transaction(s) trouvée(s) à vérifier. Début de l'analyse...");
+        $this->line("------------------------------------------------------------------");
+
+        // Barre de progression dans la console
+        $bar = $this->output->createProgressBar($count);
+        $bar->start();
+
+        foreach ($transactions as $transaction) {
+            try {
+                // 2. Appel au service Digitwave via la référence passerelle
+                $result = $digitwaveService->checkStatus($transaction->gateway_reference);
+
+                logger()->info("[Cron Status Check] Analyse transaction : {$transaction->reference}", [
+                    'gateway_ref' => $transaction->gateway_reference,
+                    'result'      => $result
+                ]);
+
+                if (isset($result['success']) && $result['success'] === true) {
+                    $apiData = $result['data'];
+
+                    // Normalisation complète (en minuscules et sans espaces)
+                    $apiStatus = strtolower(trim($apiData['status'] ?? 'pending'));
+
+                    // 3. Mise à jour selon le statut réel de l'API Digitwave
+                    if (in_array($apiStatus, ['success', 'successful', 'completed'])) {
+
+                        $transaction->update([
+                            'status' => 'success'
+                        ]);
+
+                    } elseif (in_array($apiStatus, ['failed', 'failure', 'rejected', 'declined'])) {
+
+                        $transaction->update([
+                            'status'         => 'failed',
+                            'failure_reason' => $apiData['message'] ?? 'Rejeté par l\'opérateur (Cron Check)'
+                        ]);
+
+                        // Remboursement automatique si c'est un transfert initié (TX)
+                        if (str_starts_with($transaction->reference, 'TX-')) {
+                            $refundAmount = $transaction->amount_sent + $transaction->fees;
+
+                            $wallet = $transaction->user->wallet;
+                            $wallet->increment('balance', $refundAmount);
+
+                            logger()->warning("[Cron Status Check] Transfert échoué {$transaction->reference}. Utilisateur remboursé de : {$refundAmount} XAF");
+                        }
+                    }
+                    // Si le statut est "pending", "processing", ou "initiated", on ne fait rien pour la laisser tourner.
+                } else {
+                    logger()->error("[Cron Status Check] Échec de l'appel API pour la référence {$transaction->reference}", [
+                        'response' => $result
+                    ]);
+                }
+
+            } catch (Exception $e) {
+                logger()->error("[Cron Status Check] Erreur critique sur la transaction {$transaction->reference} : " . $e->getMessage());
+            }
+
+            $bar->advance();
+        }
+
+        $bar->finish();
+        $this->newLine(2);
+        $this->info("🏁 Traitement terminé ! Les transactions ont été mises à jour.");
+        $this->line("------------------------------------------------------------------");
+
+        return Command::SUCCESS;
     }
 }
