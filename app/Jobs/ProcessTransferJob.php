@@ -9,7 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Exception;
+use Exception; // Assure-toi que cette classe est bien importée
 
 class ProcessTransferJob implements ShouldQueue
 {
@@ -38,34 +38,40 @@ class ProcessTransferJob implements ShouldQueue
 
     /**
      * Exécute le Job.
-     * * Laravel injecte automatiquement DigitwaveService ici.
+     * Laravel injecte automatiquement DigitwaveService ici.
      * @param DigitwaveService $digitwaveService
      * @throws \Throwable
      */
     public function handle(DigitwaveService $digitwaveService): void
     {
+        // -------------------------------------------------------------
+        // DÉBUG ULTRA-PRÉCOCE (Placé au tout début pour tout intercepter)
+        // -------------------------------------------------------------
+        logger()->info("[JOB HANDLE START] Début d'exécution pour la transaction : " . ($this->transaction->reference ?? 'SANS_REF'));
+        logger()->info("[JOB DEBUG STATUS/COUNTRY]", [
+            'statut_actuel' => $this->transaction->status ?? 'NON_DEFINI',
+            'pays_brut'     => $this->transaction->country_name ?? 'NON_DEFINI',
+        ]);
+        // -------------------------------------------------------------
+
+        // Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
+        $country = trim($this->transaction->country_name ?? '');
+
         // Éviter de traiter une transaction qui n'est pas en attente/processing
         if (!in_array($this->transaction->status, ['pending', 'processing'])) {
+            logger()->warning("[JOB TERMINATED] Annulation : Statut non éligible pour le traitement", [
+                'ref' => $this->transaction->reference,
+                'status' => $this->transaction->status
+            ]);
             return;
         }
 
-        // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
-        $country = trim($this->transaction->country_name);
-
-        // 1. Log d'entrée pour vérifier si le Job se lance bien
-        logger()->info("[JOB HANDLE START] Début d'exécution pour la transaction : " . ($this->transaction->reference ?? 'SANS_REF'));
-
-        // 2. Log de contrôle du statut et du pays
-        logger()->info("[JOB DEBUG STATUS/COUNTRY]", [
-            'statut_actuel' => $this->transaction->status ?? 'NON_DEFINI',
-            'pays_brut' => $this->transaction->country_name ?? 'NON_DEFINI',
-        ]);
         try {
-            // 2. Détermination de l'opérateur (Forcé pour le Congo)
+            // 1. Détermination de l'opérateur (Forcé pour le Congo)
             if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
                 $carrier = 'RESEAU CHARISMATIQUE';
 
-                // Un petit log pour confirmer la redirection en production
+                // Log de confirmation de la redirection
                 logger()->info("[Redirection Congo - Envoi] Transaction {$this->transaction->reference} redirigée vers RESEAU CHARISMATIQUE.");
             } else {
                 $carrier = $this->transaction->recipient_operator;
@@ -116,14 +122,15 @@ class ProcessTransferJob implements ShouldQueue
         } catch (Exception $e) {
             // Journaliser l'erreur interne de communication
             logger()->error("Erreur lors du traitement du transfert {$this->transaction->reference} : " . $e->getMessage());
-            // 2. Log de contrôle du statut et du pays
             logger()->info("[JOB DEBUG STATUSEND/COUNTRY]", [
-                'statut_actuel' => $this->transaction->status ?? 'NON_DEFINI', ]);
+                'statut_actuel' => $this->transaction->status ?? 'NON_DEFINI',
+            ]);
 
             // Lever l'exception permet à Laravel de replacer le job dans la file (Queue) pour une nouvelle tentative
             throw $e;
         }
     }
+
     /**
      * Gérer l'échec définitif du transfert (Remboursement).
      * @param string $reason
