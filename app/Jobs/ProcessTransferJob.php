@@ -29,6 +29,7 @@ class ProcessTransferJob implements ShouldQueue
 
     /**
      * Crée une nouvelle instance de Job.
+     * @param Transaction $transaction
      */
     public function __construct(Transaction $transaction)
     {
@@ -48,11 +49,11 @@ class ProcessTransferJob implements ShouldQueue
             return;
         }
 
-        try {
-            // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
-            $country = trim($this->transaction->country_name);
+        // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
+        $country = trim($this->transaction->country_name);
 
-            logger($country);
+        logger($country);
+        try {
             // 2. Détermination de l'opérateur (Forcé pour le Congo)
             if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
                 $carrier = 'RESEAU CHARISMATIQUE';
