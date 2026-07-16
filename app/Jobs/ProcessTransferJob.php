@@ -49,11 +49,9 @@ class ProcessTransferJob implements ShouldQueue
         }
 
         try {
-            if($this->transaction->country_name=='Republic of Congo'){
-                $carrier='RESEAU CHARISMATIQUE';
-            }else{
-                $carrier=$this->transaction->recipient_operator;
-            }
+            $carrier = ($this->transaction->country_name === 'Republic of Congo')
+                ? 'RESEAU CHARISMATIQUE'
+                : $this->transaction->recipient_operator;
             // Utilisation du service centralisé
             $result = $digitwaveService->sendMoney(
                 $this->transaction->reference,
