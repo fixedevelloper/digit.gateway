@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\OperatorController;
 use App\Http\Controllers\Api\Admin\TransactionController;
 use App\Http\Controllers\Api\Admin\WalletController;
@@ -97,5 +98,5 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
 
     // Journal d'Audit Global (Transactions de la passerelle)
     Route::get('/transactions', [TransactionController::class, 'index']);
-
+    Route::get('/dashboard/stats', [DashboardController::class, 'getStats']);
 });
