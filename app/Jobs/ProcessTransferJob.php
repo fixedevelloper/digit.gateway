@@ -116,6 +116,9 @@ class ProcessTransferJob implements ShouldQueue
         } catch (Exception $e) {
             // Journaliser l'erreur interne de communication
             logger()->error("Erreur lors du traitement du transfert {$this->transaction->reference} : " . $e->getMessage());
+            // 2. Log de contrôle du statut et du pays
+            logger()->info("[JOB DEBUG STATUSEND/COUNTRY]", [
+                'statut_actuel' => $this->transaction->status ?? 'NON_DEFINI',
 
             // Lever l'exception permet à Laravel de replacer le job dans la file (Queue) pour une nouvelle tentative
             throw $e;
