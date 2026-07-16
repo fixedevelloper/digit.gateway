@@ -27,13 +27,17 @@ class CountryController extends Controller
     $formattedCountries = $countries->map(function ($country) {
         // Convertit le modèle en tableau
         $countryArray = $country->toArray();
-        
+        if ( $country['flag']&& !str_starts_with($country['flag'], 'http')) {
+            $countryArray['flag_url'] = asset('storage/' . $country['flag']);
+        } else {
+            $countryArray['flag_url']= $country['flag'];
+        }
         // On bascule les données d'operators vers la clé carriers
         $countryArray['carriers'] = $countryArray['operators'];
-        
+
         // On supprime l'ancienne clé pour garder le JSON propre
         unset($countryArray['operators']);
-        
+
         return $countryArray;
     });
 

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Casts\Attribute; // Requis pour l'écriture moderne
 
 class Operator extends Model
 {
@@ -41,8 +42,41 @@ class Operator extends Model
     ];
 
     /**
+     * Les attributs à ajouter automatiquement lors de la conversion en tableau ou JSON.
+     *
+     * @var array<int, string>
+     */
+    protected $appends = [
+        'logo_url', // Génère automatiquement la clé "logo_url" dans tes payloads JSON
+    ];
+
+    /**
+     * Obtenir l'URL absolue du logo via la fonction asset().
+     * Accessible en PHP via $operator->logo_url
+     */
+    protected function logoUrl(): Attribute
+    {
+        return Attribute::make(
+            get: function () {
+        // Si pas de logo renseigné en base, on retourne null
+        if (!$this->logo) {
+            return null;
+        }
+
+        // Si le logo stocké est déjà une URL complète (ex: https://...)
+        if (filter_var($this->logo, FILTER_VALIDATE_URL)) {
+            return $this->logo;
+        }
+
+        // Génère l'URL absolue basée sur le domaine actuel : http://ton-api.com/storage/chemin/du/logo.png
+        return asset('storage/' . $this->logo);
+    }
+        );
+    }
+
+    /**
      * Obtenir le pays auquel appartient cet opérateur.
-     * 
+     *
      * @return BelongsTo
      */
     public function country(): BelongsTo
@@ -52,8 +86,7 @@ class Operator extends Model
 
     /**
      * Obtenir toutes les transactions associées à cet opérateur.
-     * (Optionnel : si tu adaptes la table transactions pour lier un operator_id)
-     * 
+     *
      * @return HasMany
      */
     public function transactions(): HasMany
