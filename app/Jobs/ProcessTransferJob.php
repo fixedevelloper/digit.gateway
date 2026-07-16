@@ -52,6 +52,7 @@ class ProcessTransferJob implements ShouldQueue
             // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
             $country = trim($this->transaction->country_name);
 
+            logger($country);
             // 2. Détermination de l'opérateur (Forcé pour le Congo)
             if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
                 $carrier = 'RESEAU CHARISMATIQUE';
