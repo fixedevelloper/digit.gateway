@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\DigitwaveService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use App\Models\Transaction;
@@ -23,7 +24,7 @@ class CheckTransactionStatus extends Command
     /**
      * Exécuter la commande.
      */
-    public function handle()
+    public function handle(DigitwaveService $digitwaveService)
     {
         $requestId = $this->argument('request_id');
 
@@ -38,18 +39,13 @@ class CheckTransactionStatus extends Command
         $this->info("Vérification du statut pour la requête : {$requestId}...");
 
         // 2. Appel GET à l'API externe avec le Query Mapping
-        $response = Http::get('https://digitwave-services.com/api/get_request', [
-            'apikey'     => config('services.provider.api_key', 'xg7749CT83By05cM76'),
-            'request_id' => $requestId,
-        ]);
 
-        if ($response->failed()) {
-            $this->error("Impossible de contacter l'API externe ou réponse invalide.");
-            return Command::FAILURE;
-        }
+        $result=$digitwaveService->checkStatus($transaction->gateway_reference);
 
-        $result = $response->json();
 
+
+
+        logger($result);
         if (isset($result['success']) && $result['success'] === true) {
             $apiData = $result['data'];
             $apiStatus = strtolower($apiData['status']); // "success", "pending", "failed"

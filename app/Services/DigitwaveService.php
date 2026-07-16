@@ -81,6 +81,8 @@ public function sendMoney(string $reference, string $country, string $carrier, s
 
     /**
      * 3. Vérifier le statut d'une requête (Query Mapping)
+     * @param string $requestId
+     * @return array
      */
     public function checkStatus(string $requestId): array
     {

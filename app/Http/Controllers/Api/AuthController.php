@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\API;
+namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
@@ -14,6 +14,8 @@ class AuthController extends Controller
 {
     /**
      * Inscription d'un nouvel utilisateur (Register)
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function register(Request $request)
     {
@@ -70,6 +72,8 @@ class AuthController extends Controller
 
     /**
      * Connexion de l'utilisateur (Login)
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function login(Request $request)
     {
@@ -92,7 +96,7 @@ class AuthController extends Controller
 
         // 4. Remplacement ou génération du nouveau token Sanctum
         // (Optionnel : vous pouvez nettoyer les anciens tokens si nécessaire)
-        $user->tokens()->delete(); 
+        $user->tokens()->delete();
         $token = $user->createToken('digit_gateway_token')->plainTextToken;
 
         return response()->json([
@@ -110,6 +114,8 @@ class AuthController extends Controller
 
     /**
      * Déconnexion de l'utilisateur (Logout)
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function logout(Request $request)
     {
@@ -124,6 +130,8 @@ class AuthController extends Controller
 
     /**
      * Récupération des informations du profil connecté
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function profile(Request $request)
     {

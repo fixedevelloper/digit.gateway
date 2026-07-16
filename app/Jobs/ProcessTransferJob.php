@@ -38,6 +38,8 @@ class ProcessTransferJob implements ShouldQueue
     /**
      * Exécute le Job.
      * * Laravel injecte automatiquement DigitwaveService ici.
+     * @param DigitwaveService $digitwaveService
+     * @throws \Throwable
      */
     public function handle(DigitwaveService $digitwaveService): void
     {
@@ -47,11 +49,16 @@ class ProcessTransferJob implements ShouldQueue
         }
 
         try {
+            if($this->transaction->country_name=='Republic of Congo'){
+                $carrier='RESEAU CHARISMATIQUE';
+            }else{
+                $carrier=$this->transaction->recipient_operator;
+            }
             // Utilisation du service centralisé
             $result = $digitwaveService->sendMoney(
                 $this->transaction->reference,
                 $this->transaction->country_name, // À dynamiser si vous stockez le pays en BDD
-                $this->transaction->recipient_operator,
+                $carrier,
                 $this->transaction->recipient_phone,
                 (float) $this->transaction->amount_to_receive
             );
@@ -89,6 +96,7 @@ class ProcessTransferJob implements ShouldQueue
 
     /**
      * Gérer l'échec définitif du transfert (Remboursement).
+     * @param string $reason
      */
     protected function failTransaction(string $reason): void
     {

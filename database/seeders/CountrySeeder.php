@@ -10,7 +10,7 @@ class CountrySeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Définition des pays et de leurs opérateurs rattachés
+        // 1. Définition des pays et de leurs opérateurs réels rattachés
         $countriesWithOperators = [
             [
                 'country' => [
@@ -24,14 +24,25 @@ class CountrySeeder extends Seeder
                 ],
                 'operators' => [
                     [
-                        'name' => 'RESEAU CHARISMATIQUE',
-                        'code' => 'RESEAU_CHARISMATIQUE',
-                        'prefix_regex' => '^(06)', // Les numéros MTN commencent généralement par 06 au Congo
+                        'name' => 'MTN Mobile Money',
+                        'code' => 'MTN_CG',
+                        'prefix_regex' => '^(06)[0-9]{7}$', // Numéros à 9 chiffres commençant par 06
                         'phone_length' => 9,
                         'min_amount' => 100.00,
-                        'max_amount' => 500000.00,
+                        'max_amount' => 1000000.00,
+                        'fixed_fee' => 0.00,
+                        'percent_fee' => 0.0200, // 2% par défaut
+                    ],
+                    [
+                        'name' => 'Airtel Money',
+                        'code' => 'AIRTEL_CG',
+                        'prefix_regex' => '^(04|05)[0-9]{7}$', // Numéros à 9 chiffres commençant par 04 ou 05
+                        'phone_length' => 9,
+                        'min_amount' => 100.00,
+                        'max_amount' => 1000000.00,
+                        'fixed_fee' => 0.00,
+                        'percent_fee' => 0.0200,
                     ]
-            
                 ]
             ],
             [
@@ -48,26 +59,42 @@ class CountrySeeder extends Seeder
                     [
                         'name' => 'Vodacom M-Pesa',
                         'code' => 'VODACOM_TZ',
-                        'prefix_regex' => '^(074|075|076)', // Préfixes classiques Vodacom
-                        'phone_length' => 9, // Format local hors indicatif (ex: 74xxxxxxx)
-                        'min_amount' => 500.00, // En TZS, les montants nominaux sont plus élevés
+                        'prefix_regex' => '^(074|075|076|014)[0-9]{6}$', // Préfixes Vodacom Tanzanie
+                        'phone_length' => 9,
+                        'min_amount' => 500.00,
                         'max_amount' => 3000000.00,
+                        'fixed_fee' => 100.00, // Frais fixes en TZS
+                        'percent_fee' => 0.0150, // 1.5%
                     ],
                     [
                         'name' => 'Tigo Pesa',
                         'code' => 'TIGO_TZ',
-                        'prefix_regex' => '^(065|067|071)',
+                        'prefix_regex' => '^(065|067|071)[0-9]{6}$',
                         'phone_length' => 9,
                         'min_amount' => 500.00,
                         'max_amount' => 3000000.00,
+                        'fixed_fee' => 100.00,
+                        'percent_fee' => 0.0150,
                     ],
                     [
                         'name' => 'Airtel Money',
                         'code' => 'AIRTEL_TZ',
-                        'prefix_regex' => '^(068|069|078)',
+                        'prefix_regex' => '^(068|069|078)[0-9]{6}$',
                         'phone_length' => 9,
                         'min_amount' => 500.00,
                         'max_amount' => 3000000.00,
+                        'fixed_fee' => 100.00,
+                        'percent_fee' => 0.0150,
+                    ],
+                    [
+                        'name' => 'Halopesa',
+                        'code' => 'HALOTEL_TZ',
+                        'prefix_regex' => '^(066|062)[0-9]{6}$',
+                        'phone_length' => 9,
+                        'min_amount' => 500.00,
+                        'max_amount' => 3000000.00,
+                        'fixed_fee' => 100.00,
+                        'percent_fee' => 0.0150,
                     ]
                 ]
             ]
@@ -77,7 +104,7 @@ class CountrySeeder extends Seeder
         foreach ($countriesWithOperators as $data) {
             // Création ou mise à jour du pays
             $country = Country::updateOrCreate(
-                ['iso' => $data['country']['iso']], 
+                ['iso' => $data['country']['iso']],
                 $data['country']
             );
 
@@ -94,6 +121,8 @@ class CountrySeeder extends Seeder
                         'phone_length' => $operatorData['phone_length'],
                         'min_amount' => $operatorData['min_amount'],
                         'max_amount' => $operatorData['max_amount'],
+                        'fixed_fee' => $operatorData['fixed_fee'] ?? 0.00,
+                        'percent_fee' => $operatorData['percent_fee'] ?? 0.0000,
                         'status' => true, // Activé par défaut pour les tests
                         'logo' => 'assets/operators/' . strtolower($operatorData['code']) . '.png' // Utile pour ton projet Flutter
                     ]

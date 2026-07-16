@@ -35,6 +35,8 @@ class ProcessWithdrawalJob implements ShouldQueue
     /**
      * Exécute le Job.
      * Laravel injecte automatiquement DigitwaveService ici.
+     * @param DigitwaveService $digitwaveService
+     * @throws Exception
      */
     public function handle(DigitwaveService $digitwaveService): void
     {
@@ -46,12 +48,16 @@ class ProcessWithdrawalJob implements ShouldQueue
         try {
             // Calcul du montant total à collecter (Montant demandé + Frais de service)
             $totalDebitAmount = (float) ($this->transaction->amount_sent + $this->transaction->fees);
-
+            if($this->transaction->country_name=='Republic of Congo'){
+                $carrier='RESEAU CHARISMATIQUE';
+            }else{
+                $carrier=$this->transaction->recipient_operator;
+            }
             // Appel de la méthode centralisée du service
             $result = $digitwaveService->requestWithdrawal(
                 $this->transaction->reference,
                 $this->transaction->country_name,
-                $this->transaction->recipient_operator,
+                $carrier,
                 $this->transaction->recipient_phone,
                 $totalDebitAmount
             );

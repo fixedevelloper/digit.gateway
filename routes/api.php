@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\OperatorController;
+use App\Http\Controllers\Api\Admin\TransactionController;
+use App\Http\Controllers\Api\Admin\WalletController;
+use App\Http\Controllers\Api\SecurityController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\WebhookController;
@@ -15,8 +19,6 @@ use App\Http\Controllers\Api\AuthController;
 // ==========================================
 // 1. ROUTE WEBHOOK (Callback externe)
 // ==========================================
-// Doit rester publique et en dehors de toute restriction d'API Key
-Route::post('/v1/callback', [WebhookController::class, 'handleCallback']);
 
 
 // ==========================================
@@ -24,12 +26,12 @@ Route::post('/v1/callback', [WebhookController::class, 'handleCallback']);
 // ==========================================
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
-
+Route::post('/auth/login', [SecurityController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     // Si ton application Flutter utilise des Tokens Sanctum, garde cette ligne.
     // Sinon, déplace-la dans le groupe "ApiKey" ci-dessous si le profil dépend uniquement de l'ApiKey.
-    Route::get('/profile', [AuthController::class, 'profile']); 
+    Route::get('/profile', [AuthController::class, 'profile']);
 
     //Route::get('/profile', [UserController::class, 'getProfile']);
     Route::post('/profile/update', [UserController::class, 'updateProfile']);
@@ -42,9 +44,8 @@ Route::middleware('auth:sanctum')->group(function () {
 // ==========================================
 // 3. ROUTES SÉCURISÉES PAR API KEY (Flutter App)
 // ==========================================
-// Remplacer 'check.apikey' par le nom exact de ton middleware de vérification de clé API
 Route::middleware('auth:sanctum')->group(function () {
-    
+
     // Pays et opérateurs
     Route::get('/countries', [CountryController::class, 'index']);
     Route::get('/countries/{iso}', [CountryController::class, 'show']);
@@ -69,10 +70,32 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 
-// ==========================================
-// 4. ROUTES D'ADMINISTRATION (Back-office)
-// ==========================================
-Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/countries', [CountryController::class, 'store']);
-    Route::patch('/countries/{id}/toggle-status', [CountryController::class, 'toggleStatus']);
+
+
+
+/*
+|--------------------------------------------------------------------------
+| Routes Privées - Console d'Administration (Sécurisées par Sanctum)
+|--------------------------------------------------------------------------
+*/
+Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
+
+    // Déconnexion de la session admin
+    Route::post('/auth/logout', [SecurityController::class, 'logout']);
+
+    // Gestion des Opérateurs (Kill switch, modification des frais fixes & % )
+    Route::get('/operators', [OperatorController::class, 'index']);
+    Route::put('/operators/{id}', [OperatorController::class, 'update']);
+
+    // Gestion des Pays / Corridors régionaux
+    Route::get('/countries', [\App\Http\Controllers\Api\Admin\CountryController::class, 'index']);
+    Route::put('/countries/{id}', [\App\Http\Controllers\Api\Admin\CountryController::class, 'update']);
+
+    // Gestion & Audit de la Masse Monétaire (Wallets)
+    Route::get('/wallets', [WalletController::class, 'index']);
+    Route::post('/wallets/{id}/adjust', [WalletController::class, 'adjust']); // Mutation d'ajustement manuel
+
+    // Journal d'Audit Global (Transactions de la passerelle)
+    Route::get('/transactions', [TransactionController::class, 'index']);
+
 });

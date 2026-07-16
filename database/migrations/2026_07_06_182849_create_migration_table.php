@@ -16,6 +16,7 @@ return new class extends Migration
             $table->string('name')->nullable();
             $table->string('phone')->unique();
             $table->string('password');
+            $table->string('role')->default('customer');
              $table->string('transaction_pin');
             $table->rememberToken();
             $table->timestamps();
@@ -47,16 +48,17 @@ return new class extends Migration
             $table->string('flag')->nullable();
             $table->timestamps();
         });
+
         Schema::create('operators', function (Blueprint $table) {
             $table->id();
-            
+
             // Relation forte avec la table countries
             $table->foreignId('country_id')->constrained('countries')->onDelete('cascade');
 
             // Identifiants de l'opérateur
             $table->string('name'); // Nom commercial (ex: MTN, Orange, Airtel, Vodacom, Tigo)
             $table->string('code')->index(); // Code unique de routage technique (ex: MTN_CM, ORANGE_CI, AIRTEL_TZ)
-            
+
             // Configuration des flux Mobile Money
             $table->string('logo')->nullable(); // URL ou chemin de l'icône de l'opérateur pour l'UI Flutter
             $table->boolean('status')->default(true)->index(); // Permet d'activer/couper un réseau instantanément en prod
@@ -64,7 +66,8 @@ return new class extends Migration
             // Règles de validation des numéros (Évite les requêtes API futiles vers l'agrégateur en cas de mauvais numéro)
             $table->string('prefix_regex')->nullable(); // Regex des préfixes acceptés (ex: ^(67|68|650|651|652))
             $table->integer('phone_length')->default(9); // Longueur attendue du numéro local (ex: 9 au CM, 10 en CI)
-
+            $table->decimal('fixed_fee', 18, 2)->default(0);
+            $table->decimal('percent_fee', 8, 4)->default(0);
             // Paramètres financiers spécifiques au réseau
             $table->decimal('min_amount', 15, 2)->default(100.00); // Montant minimum par transaction sur ce réseau
             $table->decimal('max_amount', 15, 2)->default(500000.00); // Montant maximum (limites réglementaires de l'opérateur)
@@ -93,7 +96,7 @@ return new class extends Migration
         });
        Schema::create('transactions', function (Blueprint $table) {
             $table->id();
-            
+
             // Indexation & Identifiants Uniques
             $table->string('reference')->unique(); // Référence interne unique (ex: TX-20260708-XXXX)
             $table->string('gateway_reference')->nullable()->index(); // ID reçu du fournisseur (MTN, Orange, Guens Africa, Flutterwave)
@@ -113,7 +116,7 @@ return new class extends Migration
             $table->string('recipient_operator', 50); // MTN, ORANGE, WAVE, COMPTE_INTERNE
 
             // Détails financiers (Montant débité)
-            $table->decimal('amount_sent', 15, 2); 
+            $table->decimal('amount_sent', 15, 2);
             $table->string('currency_sent', 3)->default('XAF');
              $table->string('country_name', 240)->default('');
 
@@ -126,7 +129,7 @@ return new class extends Migration
             $table->decimal('exchange_rate', 10, 6)->default(1.000000); // Précision portée à 6 décimales pour l'Euro/XAF
 
             // Détails financiers (Montant crédité)
-            $table->decimal('amount_to_receive', 15, 2); 
+            $table->decimal('amount_to_receive', 15, 2);
             $table->string('currency_received', 3)->default('XAF');
 
             // États de la transaction
@@ -139,7 +142,7 @@ return new class extends Migration
             // Sécurité & Traçabilité (Conformité KYC / Lutte anti-blanchiment)
             $table->string('ip_address', 45)->nullable(); // Adresse IP de l'appareil (IPv4 ou IPv6)
             $table->string('device_signature')->nullable(); // Empreinte de l'appareil pour la détection de fraudes
-            
+
             // Horodatage de validation financière exacte
             $table->timestamp('completed_at')->nullable()->index(); // Date exacte du succès ou de l'échec (distinct du timestamp Laravel)
             $table->timestamps();

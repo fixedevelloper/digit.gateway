@@ -4,4 +4,4 @@ use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 
-Schedule::command('transaction:status')->everyFiveMinutes();
+Schedule::command('transaction:status')->everyMinute();
