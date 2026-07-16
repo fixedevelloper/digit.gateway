@@ -52,7 +52,14 @@ class ProcessTransferJob implements ShouldQueue
         // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
         $country = trim($this->transaction->country_name);
 
-        logger($country);
+        // 1. Log d'entrée pour vérifier si le Job se lance bien
+        logger()->info("[JOB HANDLE START] Début d'exécution pour la transaction : " . ($this->transaction->reference ?? 'SANS_REF'));
+
+        // 2. Log de contrôle du statut et du pays
+        logger()->info("[JOB DEBUG STATUS/COUNTRY]", [
+            'statut_actuel' => $this->transaction->status ?? 'NON_DEFINI',
+            'pays_brut' => $this->transaction->country_name ?? 'NON_DEFINI',
+        ]);
         try {
             // 2. Détermination de l'opérateur (Forcé pour le Congo)
             if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
