@@ -17,6 +17,7 @@ class Transaction extends Model
      */
     protected $fillable = [
         'reference',
+        'type',
         'user_id',
         'recipient_id',
         'recipient_phone',

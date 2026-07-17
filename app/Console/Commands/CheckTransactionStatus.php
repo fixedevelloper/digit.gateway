@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Events\TransactionStatusUpdated;
 use App\Services\DigitwaveService;
 use Illuminate\Console\Command;
 use App\Models\Transaction;
@@ -94,6 +95,8 @@ class CheckTransactionStatus extends Command
                             logger()->warning("[Cron Status Check] Transfert échoué {$transaction->reference}. Utilisateur remboursé de : {$refundAmount} XAF");
                         }
                     }
+                    // Diffuser l'événement en temps réel
+                    TransactionStatusUpdated::dispatch($transaction);
                     // Si le statut est "pending", "processing", ou "initiated", on ne fait rien pour la laisser tourner.
                 } else {
                     logger()->error("[Cron Status Check] Échec de l'appel API pour la référence {$transaction->reference}", [
