@@ -36,7 +36,13 @@ class TestTransactionStatusBroadcast extends Command
         $transaction->update(['status' => $status]);
 
         // Diffusion réelle sur le canal Reverb (c'est ça que tu veux tester)
-        TransactionStatusUpdated::dispatch($transaction);
+        try {
+            TransactionStatusUpdated::dispatch($transaction);
+            $this->info("✅ dispatch() exécuté sans exception");
+        } catch (\Throwable $e) {
+            $this->error("❌ Exception lors du dispatch : " . $e->getMessage());
+            Log::error('[test-broadcast] Exception', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+        }
         Log::info('[Broadcast Dispatch] Event TransactionStatusUpdated diffusé', [
             'channel'   => 'user.' . $transaction->user_id,
             'reference' => $transaction->reference,
