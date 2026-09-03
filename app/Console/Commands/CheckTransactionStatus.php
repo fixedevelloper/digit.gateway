@@ -63,8 +63,17 @@ class CheckTransactionStatus extends Command
                                     'failure_reason' => $result->message ?? 'Rejeté par l\'opérateur',
                                 ]);
 
-                                // Remboursement automatique
-                                if (str_starts_with($transaction->reference, 'TX-')) {
+                                // Remboursement automatique : uniquement pour transfer/withdrawal, qui
+                                // débitent le wallet dès l'initiation (TransferController). Un dépôt ne
+                                // débite jamais rien à la création — le rembourser créditerait un montant
+                                // qui n'a jamais été prélevé.
+                                //
+                                // Régression : cette condition testait auparavant le préfixe de la
+                                // référence ('TX-' uniquement), alors que withdrawal ET deposit
+                                // partagent tous les deux le préfixe 'WD-' — un retrait qui échoue via
+                                // ce chemin (détecté par le polling, pas par la réponse immédiate de la
+                                // passerelle) n'était donc jamais remboursé malgré le débit initial.
+                                if (in_array($transaction->type, ['transfer', 'withdrawal'])) {
                                     $refundAmount = $transaction->amount_sent + $transaction->fees;
                                     $transaction->user->wallet()->increment('balance', $refundAmount);
                                 }
