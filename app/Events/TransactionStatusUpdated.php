@@ -23,7 +23,7 @@ class TransactionStatusUpdated implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
-        $channelName = 'user.' . $this->transaction->user_id;
+        $channelName = 'user.'.$this->transaction->user_id;
 
         Log::info('[TransactionStatusUpdated] 📡 Canal public déterminé', [
             'channel' => $channelName,
@@ -44,8 +44,8 @@ class TransactionStatusUpdated implements ShouldBroadcastNow
     {
         $payload = [
             'reference' => $this->transaction->reference,
-            'status'    => $this->transaction->status,
-            'amount'    => $this->transaction->amount_to_receive,
+            'status' => $this->transaction->status,
+            'amount' => $this->transaction->amount_to_receive,
         ];
 
         Log::info('[TransactionStatusUpdated] 📦 Payload à diffuser', $payload);

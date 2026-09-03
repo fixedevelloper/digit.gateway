@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('phone')->unique();
             $table->string('password');
             $table->string('role')->default('customer');
-             $table->string('transaction_pin');
+            $table->string('transaction_pin');
             $table->rememberToken();
             $table->timestamps();
         });
@@ -36,7 +36,7 @@ return new class extends Migration
             $table->longText('payload');
             $table->integer('last_activity')->index();
         });
-         Schema::create('countries', function (Blueprint $table) {
+        Schema::create('countries', function (Blueprint $table) {
             $table->id();
             $table->string('name')->unique();
             $table->string('iso')->unique();
@@ -94,7 +94,7 @@ return new class extends Migration
             $table->string('country_code', 2); // ex: 'CM', 'CI', 'SN'
             $table->timestamps();
         });
-       Schema::create('transactions', function (Blueprint $table) {
+        Schema::create('transactions', function (Blueprint $table) {
             $table->id();
 
             // Indexation & Identifiants Uniques
@@ -107,8 +107,8 @@ return new class extends Migration
 
             // Acteurs de la transaction
             $table->foreignId('user_id')->constrained()->onDelete('cascade'); // L'expéditeur ou l'initiateur
-         // Remplace 'users' par 'recipients'
-           $table->foreignId('recipient_id')->nullable()->constrained('recipients')->onDelete('set null');// Bénéficiaire interne si inscrit
+            // Remplace 'users' par 'recipients'
+            $table->foreignId('recipient_id')->nullable()->constrained('recipients')->onDelete('set null'); // Bénéficiaire interne si inscrit
 
             // Données brutes du bénéficiaire (Historisation obligatoire en cas de changement de profil ou si externe)
             $table->string('recipient_name')->nullable(); // Nom affiché lors de l'envoi pour l'audit
@@ -118,7 +118,7 @@ return new class extends Migration
             // Détails financiers (Montant débité)
             $table->decimal('amount_sent', 15, 2);
             $table->string('currency_sent', 3)->default('XAF');
-             $table->string('country_name', 240)->default('');
+            $table->string('country_name', 240)->default('');
 
             // Ventilation précise des frais (Crucial pour la comptabilité et les rapports de marge)
             $table->decimal('fees', 15, 2)->default(0.00); // Frais totaux facturés au client
@@ -157,6 +157,14 @@ return new class extends Migration
      */
     public function down(): void
     {
+        // Ordre inverse de création pour respecter les contraintes de clé étrangère.
         Schema::dropIfExists('transactions');
+        Schema::dropIfExists('recipients');
+        Schema::dropIfExists('wallets');
+        Schema::dropIfExists('operators');
+        Schema::dropIfExists('countries');
+        Schema::dropIfExists('sessions');
+        Schema::dropIfExists('password_reset_tokens');
+        Schema::dropIfExists('users');
     }
 };

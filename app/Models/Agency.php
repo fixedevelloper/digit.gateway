@@ -46,8 +46,6 @@ class Agency extends Model
 
     /**
      * Relation : Une agence possède plusieurs transactions / retraits.
-     *
-     * @return HasMany
      */
     public function transactions(): HasMany
     {

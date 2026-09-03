@@ -3,9 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Jobs\ProcessTransferJob;
-use Illuminate\Console\Command;
 use App\Models\Transaction;
-use App\Jobs\SendMoneyJob; // ⚠️ Remplace par le nom réel de ton Job
+use Illuminate\Console\Command;
+
+// ⚠️ Remplace par le nom réel de ton Job
 
 class TestDigitwaveCongo extends Command
 {
@@ -34,35 +35,37 @@ class TestDigitwaveCongo extends Command
         // 1. Recherche de la transaction
         $transaction = Transaction::where('reference', $reference)->first();
 
-        if (!$transaction) {
+        if (! $transaction) {
             $this->error("❌ Impossible de trouver la transaction avec la référence : {$reference}");
+
             return Command::FAILURE;
         }
 
-        $this->info("🔍 Transaction trouvée !");
-        $this->line("--------------------------------------------------");
-        $this->line("ID      : " . $transaction->id);
-        $this->line("Pays    : '" . $transaction->country_name . "'");
-        $this->line("Statut  : '" . $transaction->status . "'");
-        $this->line("Opérat. : '" . $transaction->recipient_operator . "'");
-        $this->line("Téléph. : " . $transaction->recipient_phone);
-        $this->line("Montant : " . $transaction->amount_to_receive);
-        $this->line("--------------------------------------------------");
+        $this->info('🔍 Transaction trouvée !');
+        $this->line('--------------------------------------------------');
+        $this->line('ID      : '.$transaction->id);
+        $this->line("Pays    : '".$transaction->country_name."'");
+        $this->line("Statut  : '".$transaction->status."'");
+        $this->line("Opérat. : '".$transaction->recipient_operator."'");
+        $this->line('Téléph. : '.$transaction->recipient_phone);
+        $this->line('Montant : '.$transaction->amount_to_receive);
+        $this->line('--------------------------------------------------');
 
         // 2. Si tu veux tester le Job mais que le statut bloque (ex: elle n'est pas 'pending' ou 'processing')
-        if (!in_array($transaction->status, ['pending', 'processing'])) {
+        if (! in_array($transaction->status, ['pending', 'processing'])) {
             $this->warn("⚠️ Le statut actuel est '{$transaction->status}'. Le Job va normalement l'ignorer.");
 
             if ($this->confirm("Voulez-vous forcer temporairement le statut à 'pending' pour ce test ?", true)) {
                 $transaction->update(['status' => 'pending']);
                 $this->info("✅ Statut mis à jour à 'pending'.");
             } else {
-                $this->error("❌ Test annulé car le statut bloque.");
+                $this->error('❌ Test annulé car le statut bloque.');
+
                 return Command::FAILURE;
             }
         }
 
-        $this->info("🚀 Lancement du Job en mode synchrone...");
+        $this->info('🚀 Lancement du Job en mode synchrone...');
 
         try {
             // 3. Dispatch du Job en mode synchrone (exécuté immédiatement dans la console, pas en arrière-plan)
@@ -72,15 +75,15 @@ class TestDigitwaveCongo extends Command
 
             // Recharger la transaction pour voir si elle a changé de statut (ex: 'processing' ou 'success')
             $transaction->refresh();
-            $this->info("Nouveau statut en BDD : '" . $transaction->status . "'");
+            $this->info("Nouveau statut en BDD : '".$transaction->status."'");
 
         } catch (\Exception $e) {
             $this->error("💥 Une erreur est survenue lors de l'exécution du Job :");
             $this->error($e->getMessage());
         }
 
-        $this->line("--------------------------------------------------");
-        $this->info("💡 Consulte tes fichiers de logs (storage/logs/laravel.log) pour voir les détails !");
+        $this->line('--------------------------------------------------');
+        $this->info('💡 Consulte tes fichiers de logs (storage/logs/laravel.log) pour voir les détails !');
 
         return Command::SUCCESS;
     }

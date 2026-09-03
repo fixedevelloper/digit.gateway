@@ -13,10 +13,10 @@ class CheckAdminRole
         $user = $request->user();
 
         // Vérification stricte selon les rôles définis dans ta migration
-        if (!$user || !in_array($user->role, ['admin', 'superadmin'])) {
+        if (! $user || ! in_array($user->role, ['admin', 'superadmin'])) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Accès interdit. Privilèges administratifs requis.'
+                'message' => 'Accès interdit. Privilèges administratifs requis.',
             ], 403);
         }
 

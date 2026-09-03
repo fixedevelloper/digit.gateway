@@ -42,8 +42,8 @@ class CountrySeeder extends Seeder
                         'max_amount' => 1000000.00,
                         'fixed_fee' => 0.00,
                         'percent_fee' => 0.0200,
-                    ]
-                ]
+                    ],
+                ],
             ],
             [
                 'country' => [
@@ -95,9 +95,9 @@ class CountrySeeder extends Seeder
                         'max_amount' => 3000000.00,
                         'fixed_fee' => 100.00,
                         'percent_fee' => 0.0150,
-                    ]
-                ]
-            ]
+                    ],
+                ],
+            ],
         ];
 
         // 2. Traitement et injection en base de données
@@ -113,7 +113,7 @@ class CountrySeeder extends Seeder
                 Operator::updateOrCreate(
                     [
                         'country_id' => $country->id,
-                        'code' => $operatorData['code']
+                        'code' => $operatorData['code'],
                     ],
                     [
                         'name' => $operatorData['name'],
@@ -124,7 +124,7 @@ class CountrySeeder extends Seeder
                         'fixed_fee' => $operatorData['fixed_fee'] ?? 0.00,
                         'percent_fee' => $operatorData['percent_fee'] ?? 0.0000,
                         'status' => true, // Activé par défaut pour les tests
-                        'logo' => 'assets/operators/' . strtolower($operatorData['code']) . '.png' // Utile pour ton projet Flutter
+                        'logo' => 'assets/operators/'.strtolower($operatorData['code']).'.png', // Utile pour ton projet Flutter
                     ]
                 );
             }

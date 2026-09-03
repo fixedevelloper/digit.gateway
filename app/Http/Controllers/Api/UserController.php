@@ -6,23 +6,9 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
-    /**
-     * Récupérer les informations du profil utilisateur connecté.
-     * Route: GET /api/profile
-     */
-    public function getProfile(Request $request)
-    {
-        // Ton ApiClient s'attend à trouver l'utilisateur sous la clé 'user' ou à la racine
-        return response()->json([
-            'status' => 'success',
-            'user' => $request->user(), // Retourne le UserModel complet
-        ], 200);
-    }
-
     /**
      * Mettre à jour les informations de base du profil.
      * Route: POST /api/profile/update
@@ -35,7 +21,7 @@ class UserController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             // Exemple de validation pour le Cameroun : unique excepté pour l'utilisateur actuel
-            'phone' => 'required|string|max:20|unique:users,phone,' . $user->id,
+            'phone' => 'required|string|max:20|unique:users,phone,'.$user->id,
         ], [
             'name.required' => 'Le nom est obligatoire.',
             'phone.required' => 'Le numéro de téléphone est obligatoire.',
@@ -45,7 +31,7 @@ class UserController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'status' => 'error',
-                'errors' => $validator->errors() // Capturé par _parseDioError dans Flutter
+                'errors' => $validator->errors(), // Capturé par _parseDioError dans Flutter
             ], 422);
         }
 
@@ -58,7 +44,7 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Profil mis à jour avec succès.',
-            'user' => $user
+            'user' => $user,
         ], 200);
     }
 
@@ -85,27 +71,27 @@ class UserController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'status' => 'error',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         // Vérification de la correspondance de l'ancien code PIN
         // Supposons que ton champ en base de données s'appelle 'transaction_pin' et soit haché
-        if (!Hash::check($request->old_pin, $user->transaction_pin)) {
+        if (! Hash::check($request->old_pin, $user->transaction_pin)) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'L\'ancien code PIN saisi est incorrect.' // Capturé par data['message'] dans Flutter
+                'message' => 'L\'ancien code PIN saisi est incorrect.', // Capturé par data['message'] dans Flutter
             ], 400);
         }
 
         // Mise à jour du code PIN (haché pour la sécurité)
         $user->update([
-            'transaction_pin' => Hash::make($request->pin)
+            'transaction_pin' => Hash::make($request->pin),
         ]);
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Code PIN de transaction modifié avec succès.'
+            'message' => 'Code PIN de transaction modifié avec succès.',
         ], 200);
     }
 
@@ -130,26 +116,26 @@ class UserController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'status' => 'error',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         // Vérification de l'ancien mot de passe
-        if (!Hash::check($request->current_password, $user->password)) {
+        if (! Hash::check($request->current_password, $user->password)) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Le mot de passe actuel est incorrect.'
+                'message' => 'Le mot de passe actuel est incorrect.',
             ], 400);
         }
 
         // Sauvegarde du nouveau mot de passe haché
         $user->update([
-            'password' => Hash::make($request->password)
+            'password' => Hash::make($request->password),
         ]);
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Mot de passe mis à jour avec succès.'
+            'message' => 'Mot de passe mis à jour avec succès.',
         ], 200);
     }
 }

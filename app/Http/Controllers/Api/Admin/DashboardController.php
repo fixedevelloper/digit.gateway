@@ -1,6 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Api\Admin;
+
 use App\Http\Controllers\Controller;
 use App\Models\Transaction; // Ajuste selon le nom de ton modèle de transactions
 use Carbon\Carbon;
@@ -36,11 +37,12 @@ class DashboardController extends Controller
         // 4. Génération de l'historique des 7 derniers jours (Crédit vs Débit)
         $sevenDaysAgo = Carbon::now()->subDays(6)->startOfDay();
 
-        // Requête groupée par jour et par type de transaction (ex: 'credit' = dépôt, 'debit' = retrait/paiement)
+        // Requête groupée par jour et par type de transaction.
+        // 'deposit' = argent entrant dans le wallet (crédit) ; 'withdrawal'/'transfer'/'payment' = argent sortant (débit).
         $rawFlows = Transaction::select(
             DB::raw('DATE(created_at) as date'),
-            DB::raw("SUM(CASE WHEN type = 'credit' THEN amount_sent ELSE 0 END) as total_credit"),
-            DB::raw("SUM(CASE WHEN type = 'debit' THEN amount_to_receive ELSE 0 END) as total_debit")
+            DB::raw("SUM(CASE WHEN type = 'deposit' THEN amount_sent ELSE 0 END) as total_credit"),
+            DB::raw("SUM(CASE WHEN type IN ('withdrawal', 'transfer', 'payment') THEN amount_sent ELSE 0 END) as total_debit")
         )
             ->where('status', 'success')
             ->where('created_at', '>=', $sevenDaysAgo)
@@ -68,8 +70,8 @@ class DashboardController extends Controller
                 'monthlyVolume' => (float) $monthlyVolume,
                 'successfulTransactionsCount' => $successfulTransactionsCount,
                 'successRate' => $successRate,
-                'dailyHistory' => $dailyHistory
-            ]
+                'dailyHistory' => $dailyHistory,
+            ],
         ]);
     }
 }

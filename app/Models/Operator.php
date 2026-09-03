@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Casts\Attribute; // Requis pour l'écriture moderne
+use Illuminate\Database\Eloquent\Relations\HasMany; // Requis pour l'écriture moderne
 
 class Operator extends Model
 {
@@ -25,6 +25,8 @@ class Operator extends Model
         'status',
         'prefix_regex',
         'phone_length',
+        'fixed_fee',
+        'percent_fee',
         'min_amount',
         'max_amount',
     ];
@@ -37,6 +39,8 @@ class Operator extends Model
     protected $casts = [
         'status' => 'boolean',
         'phone_length' => 'integer',
+        'fixed_fee' => 'decimal:2',
+        'percent_fee' => 'decimal:4',
         'min_amount' => 'decimal:2',
         'max_amount' => 'decimal:2',
     ];
@@ -58,26 +62,24 @@ class Operator extends Model
     {
         return Attribute::make(
             get: function () {
-        // Si pas de logo renseigné en base, on retourne null
-        if (!$this->logo) {
-            return null;
-        }
+                // Si pas de logo renseigné en base, on retourne null
+                if (! $this->logo) {
+                    return null;
+                }
 
-        // Si le logo stocké est déjà une URL complète (ex: https://...)
-        if (filter_var($this->logo, FILTER_VALIDATE_URL)) {
-            return $this->logo;
-        }
+                // Si le logo stocké est déjà une URL complète (ex: https://...)
+                if (filter_var($this->logo, FILTER_VALIDATE_URL)) {
+                    return $this->logo;
+                }
 
-        // Génère l'URL absolue basée sur le domaine actuel : http://ton-api.com/storage/chemin/du/logo.png
-        return asset('storage/' . $this->logo);
-    }
+                // Génère l'URL absolue basée sur le domaine actuel : http://ton-api.com/storage/chemin/du/logo.png
+                return asset('storage/'.$this->logo);
+            }
         );
     }
 
     /**
      * Obtenir le pays auquel appartient cet opérateur.
-     *
-     * @return BelongsTo
      */
     public function country(): BelongsTo
     {
@@ -86,8 +88,6 @@ class Operator extends Model
 
     /**
      * Obtenir toutes les transactions associées à cet opérateur.
-     *
-     * @return HasMany
      */
     public function transactions(): HasMany
     {

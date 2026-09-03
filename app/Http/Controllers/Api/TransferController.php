@@ -3,18 +3,24 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\DepositRequest;
 use App\Http\Requests\TransferRequest;
 use App\Http\Requests\WithdrawalRequest;
-use App\Http\Requests\DepositRequest;
 use App\Jobs\ProcessTransferJob;
 use App\Jobs\ProcessWithdrawalJob;
+use App\Models\Agency;
+use App\Models\Operator;
 use App\Models\Transaction;
+use App\Models\Wallet;
+use Illuminate\Http\JsonResponse; // <- Ajouté pour l'authentification
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth; // <- Ajouté pour l'authentification
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use App\Models\Agency; // Pensez à importer votre modèle d'agence
+use Illuminate\Validation\ValidationException;
+
+ // Pensez à importer votre modèle d'agence
 
 class TransferController extends Controller
 {
@@ -24,190 +30,189 @@ class TransferController extends Controller
      */
     public function initiateTransfer(TransferRequest $request)
     {
-        // Récupération de l'utilisateur authentifié via Sanctum ou Session
+        // Authentification (auth:sanctum) + PIN ('pin.verify') + anti-doublon ('idempotent:transfer')
+        // sont déjà garantis par les middlewares de la route à ce stade.
         $user = Auth::user();
 
-        if (!$user) {
-            return response()->json([
-                'status'  => 'error',
-                'message' => 'Unauthenticated.'
-            ], 401);
-        }
-
-        $wallet = $user->wallet;
-        $amount = (float)$request->amount;
-        $feeCharged = 2.00;
-        $totalDeduction = $amount + $feeCharged;
-
-        if ($wallet->balance < $totalDeduction) {
-            return response()->json([
-                'status'  => 'error',
-                'message' => 'Insufficient fund/Balance.'
-            ], 400);
-        }
-
-        $requestId = 'TX-' . strtoupper(Str::random(12));
+        $amount = (float) $request->amount;
+        $requestId = 'TX-'.strtoupper(Str::random(12));
 
         try {
-            DB::beginTransaction();
+            // Verrouillage pessimiste de la ligne wallet pendant toute la transaction
+            // pour empêcher une double dépense en cas de requêtes concurrentes.
+            $result = DB::transaction(function () use ($user, $amount, $requestId, $request) {
+                $operator = $this->resolveOperator($request->country, $request->carrier, $amount);
+                $feeCharged = $this->computeOperatorFee($operator, $amount);
+                $totalDeduction = $amount + $feeCharged;
 
-            $wallet->decrement('balance', $totalDeduction);
+                $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->firstOrFail();
 
-            $transaction = Transaction::create([
-                'reference' => $requestId,
-                'user_id' => $user->id,
-                'recipient_phone' => $request->number,
-                'recipient_operator' => $request->carrier,
-                'amount_sent' => $amount,
-                'country_name'=>$request->country,
-                'currency_sent' => $wallet->currency,
-                'fees' => $feeCharged,
-                'amount_to_receive' => $amount,
-                'currency_received' => 'XAF',
-                'status' => 'processing',
-                'type' => 'transfer',
-            ]);
+                if ($wallet->balance < $totalDeduction) {
+                    throw ValidationException::withMessages([
+                        'amount' => ['Insufficient fund/Balance.'],
+                    ]);
+                }
 
-            DB::commit();
+                $wallet->decrement('balance', $totalDeduction);
 
-            ProcessTransferJob::dispatch($transaction);
+                $transaction = Transaction::create([
+                    'reference' => $requestId,
+                    'user_id' => $user->id,
+                    'recipient_phone' => $request->number,
+                    'recipient_operator' => $request->carrier,
+                    'amount_sent' => $amount,
+                    'country_name' => $request->country,
+                    'currency_sent' => $wallet->currency,
+                    'fees' => $feeCharged,
+                    'amount_to_receive' => $amount,
+                    'currency_received' => 'XAF',
+                    'status' => 'processing',
+                    'type' => 'transfer',
+                ]);
 
+                return ['transaction' => $transaction, 'balance' => $wallet->balance, 'fee' => $feeCharged, 'total' => $totalDeduction];
+            });
+        } catch (ValidationException $e) {
             return response()->json([
-                'status'            => 'success',
-                'message'           => 'Request accepted, processing in progress',
-                'amount'            => $amount,
-                'fee_charged'       => $feeCharged,
-                'total'             => $totalDeduction,
-                'remaining_balance' => (float)$wallet->refresh()->balance,
-                'request_id'        => $requestId
-            ], 200);
-
+                'status' => 'error',
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 400);
         } catch (\Exception $e) {
-            DB::rollBack();
             logger($e->getMessage());
+
             return response()->json([
-                'status'  => 'error',
-                'message' => 'An error occurred while processing your request. Please try again.'
+                'status' => 'error',
+                'message' => 'An error occurred while processing your request. Please try again.',
             ], 500);
         }
+
+        ProcessTransferJob::dispatch($result['transaction']);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Request accepted, processing in progress',
+            'amount' => $amount,
+            'fee_charged' => $result['fee'],
+            'total' => $result['total'],
+            'remaining_balance' => (float) $result['balance'],
+            'request_id' => $requestId,
+        ], 200);
     }
 
     /**
      * POST /api/withdrawal
      * Gère la demande de retrait / collecte
      */
+    public function initiateWithdrawal(WithdrawalRequest $request)
+    {
+        // Authentification (auth:sanctum) + PIN ('pin.verify') + anti-doublon ('idempotent:withdrawal')
+        // sont déjà garantis par les middlewares de la route à ce stade.
+        $user = Auth::user();
 
+        // 1. Vérification de l'existence et du statut de l'agence via son code
+        $agency = Agency::where('code', $request->agensic_code)
+            ->where('status', 'active') // Optionnel : s'assurer qu'elle n'est pas suspendue
+            ->first();
 
-public function initiateWithdrawal(WithdrawalRequest $request)
-{
-    $user = Auth::user();
+        if (! $agency) {
+            return response()->json([
+                'status' => 'error',
+                'message' => "Le code d'agence fourni est invalide ou l'agence n'est pas disponible.",
+            ], 422); // 422 Unprocessable Entity pour les erreurs de validation métier
+        }
 
-    if (!$user) {
+        $amount = (float) $request->amount;
+        $requestId = 'WD-'.strtoupper(Str::random(12));
+
+        try {
+            // Verrouillage pessimiste de la ligne wallet pendant toute la transaction
+            // pour empêcher une double dépense en cas de requêtes concurrentes.
+            $result = DB::transaction(function () use ($user, $agency, $amount, $requestId, $request) {
+                $operator = $this->resolveOperator($request->country, $request->carrier, $amount);
+                $feeCharged = $this->computeOperatorFee($operator, $amount);
+                $totalDeduction = $amount + $feeCharged;
+
+                $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->firstOrFail();
+
+                if ($wallet->balance < $totalDeduction) {
+                    throw ValidationException::withMessages([
+                        'amount' => ['Solde insuffisant pour effectuer ce retrait.'],
+                    ]);
+                }
+
+                $wallet->decrement('balance', $totalDeduction);
+
+                $transaction = Transaction::create([
+                    'reference' => $requestId,
+                    'user_id' => $user->id,
+                    'agency_id' => $agency->id, // Associer l'ID de l'agence trouvée
+                    'recipient_phone' => $request->number,
+                    'recipient_operator' => $request->carrier,
+                    'country_name' => $request->country,
+                    'amount_sent' => $amount,
+                    'fees' => $feeCharged,
+                    'amount_to_receive' => $amount,
+                    'currency_sent' => $wallet->currency,
+                    'currency_received' => $wallet->currency,
+                    'status' => 'pending',
+                    'type' => 'withdrawal', // Correction : 'withdrawal' au lieu de 'deposit'
+                ]);
+
+                return ['transaction' => $transaction, 'balance' => $wallet->balance, 'fee' => $feeCharged, 'total' => $totalDeduction];
+            });
+        } catch (ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 400);
+        } catch (\Exception $e) {
+            // Loggez l'erreur pour le debug interne si nécessaire
+            Log::error('Erreur retrait: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'An error occurred during the withdrawal request.',
+            ], 500);
+        }
+
+        ProcessTransferJob::dispatch($result['transaction']);
+
         return response()->json([
-            'status'  => 'error',
-            'message' => 'Unauthenticated.'
-        ], 401);
-    }
-
-    // 1. Vérification de l'existence et du statut de l'agence
-/*    $agency = Agency::where('code', $request->agensic_code)
-                    ->where('status', 'active') // Optionnel : s'assurer qu'elle n'est pas suspendue
-                    ->first();*/
-    $agency = Agency::where('status', 'active') // Optionnel : s'assurer qu'elle n'est pas suspendue
-        ->first();
-
-    if (!$agency) {
-        return response()->json([
-            'status'  => 'error',
-            'message' => "Le code d'agence fourni est invalide ou l'agence n'est pas disponible."
-        ], 422); // 422 Unprocessable Entity pour les erreurs de validation métier
-    }
-
-    $wallet = $user->wallet;
-    $amount = (float) $request->amount;
-    $feeCharged = 5.00;
-    $totalDeduction = $amount + $feeCharged;
-
-    // 2. [Sécurité Optionnelle] : Vérifier si le portefeuille a un solde suffisant
-    if ($wallet->balance < $totalDeduction) {
-        return response()->json([
-            'status'  => 'error',
-            'message' => 'Solde insuffisant pour effectuer ce retrait.'
-        ], 400);
-    }
-
-    $requestId = 'WD-' . strtoupper(Str::random(12));
-
-    try {
-        DB::beginTransaction();
-
-        // Déduire le montant du portefeuille de l'utilisateur ici si ce n'est pas géré dans le Job
-        $wallet->decrement('balance', $totalDeduction);
-
-        $transaction = Transaction::create([
-            'reference' => $requestId,
-            'user_id' => $user->id,
-            'agency_id' => $agency->id, // Associer l'ID de l'agence trouvée
-            'recipient_phone' => $request->number,
-            'recipient_operator' => $request->carrier,
-            'country_name' => $request->country,
-            'amount_sent' => $amount,
-            'fees' => $feeCharged,
-            'amount_to_receive' => $amount,
-            'currency_sent' => $wallet->currency,
-            'currency_received' => $wallet->currency,
-            'status' => 'pending',
-            'type' => 'withdrawal', // Correction : 'withdrawal' au lieu de 'deposit'
-        ]);
-
-        DB::commit();
-
-        ProcessTransferJob::dispatch($transaction);
-
-        return response()->json([
-            'status'            => 'success',
-            'message'           => 'Request accepted, processing in progress',
-            'amount'            => $amount,
-            'fee_charged'       => $feeCharged,
-            'total'             => $totalDeduction,
-            'remaining_balance' => (float) $wallet->refresh()->balance, // refresh pour avoir le solde à jour
-            'request_id'        => $requestId
+            'status' => 'success',
+            'message' => 'Request accepted, processing in progress',
+            'amount' => $amount,
+            'fee_charged' => $result['fee'],
+            'total' => $result['total'],
+            'remaining_balance' => (float) $result['balance'],
+            'request_id' => $requestId,
         ], 200);
-
-    } catch (\Exception $e) {
-        DB::rollBack();
-
-        // Loggez l'erreur pour le debug interne si nécessaire
-        Log::error("Erreur retrait: " . $e->getMessage());
-
-        return response()->json([
-            'status'  => 'error',
-            'message' => 'An error occurred during the withdrawal request.'
-        ], 500);
     }
-}
 
-        /**
+    /**
      * POST /api/deposit
      * Gère la demande de retrait / collecte
      */
     public function initiateDeposit(DepositRequest $request)
     {
+        // Authentification (auth:sanctum) + PIN ('pin.verify') + anti-doublon ('idempotent:deposit')
+        // sont déjà garantis par les middlewares de la route à ce stade.
         $user = Auth::user();
-
-        if (!$user) {
-            return response()->json([
-                'status'  => 'error',
-                'message' => 'Unauthenticated.'
-            ], 401);
-        }
 
         $wallet = $user->wallet;
         $amount = (float) $request->amount;
-        $feeCharged = 5.00;
-        $totalDeduction = $amount + $feeCharged;
+        $requestId = 'WD-'.strtoupper(Str::random(12));
 
-        $requestId = 'WD-' . strtoupper(Str::random(12));
+        try {
+            $operator = $this->resolveOperator($request->country, $request->carrier, $amount);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 400);
+        }
+
+        $feeCharged = $this->computeOperatorFee($operator, $amount);
+        $totalDeduction = $amount + $feeCharged;
 
         try {
             DB::beginTransaction();
@@ -217,7 +222,7 @@ public function initiateWithdrawal(WithdrawalRequest $request)
                 'user_id' => $user->id,
                 'recipient_phone' => $request->number,
                 'recipient_operator' => $request->carrier,
-                'country_name'=>$request->country,
+                'country_name' => $request->country,
                 'amount_sent' => $amount,
                 'fees' => $feeCharged,
                 'amount_to_receive' => $totalDeduction,
@@ -232,22 +237,60 @@ public function initiateWithdrawal(WithdrawalRequest $request)
             ProcessWithdrawalJob::dispatch($transaction);
 
             return response()->json([
-                'status'            => 'success',
-                'message'           => 'Request accepted, processing in progress',
-                'amount'            => $amount,
-                'fee_charged'       => $feeCharged,
-                'total'             => $totalDeduction,
+                'status' => 'success',
+                'message' => 'Request accepted, processing in progress',
+                'amount' => $amount,
+                'fee_charged' => $feeCharged,
+                'total' => $totalDeduction,
                 'remaining_balance' => (float) $wallet->balance,
-                'request_id'        => $requestId
+                'request_id' => $requestId,
             ], 200);
 
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
-                'status'  => 'error',
-                'message' => 'An error occurred during the withdrawal request.'
+                'status' => 'error',
+                'message' => 'An error occurred during the withdrawal request.',
             ], 500);
         }
+    }
+
+    /**
+     * Résout l'opérateur actif correspondant au pays et au code transmis par le client,
+     * et vérifie que le montant demandé respecte les bornes min/max configurées pour cet opérateur.
+     * Lève une ValidationException si l'opérateur est introuvable/inactif ou si le montant est hors bornes.
+     */
+    private function resolveOperator(string $countryName, string $carrierCode, float $amount): Operator
+    {
+        $operator = Operator::whereHas('country', function ($q) use ($countryName) {
+            $q->where('name', $countryName)->where('status', true);
+        })
+            ->where('code', $carrierCode)
+            ->where('status', true)
+            ->first();
+
+        if (! $operator) {
+            throw ValidationException::withMessages([
+                'carrier' => ["Opérateur « {$carrierCode} » non supporté ou indisponible pour « {$countryName} »."],
+            ]);
+        }
+
+        if ($amount < (float) $operator->min_amount || $amount > (float) $operator->max_amount) {
+            throw ValidationException::withMessages([
+                'amount' => ["Le montant doit être compris entre {$operator->min_amount} et {$operator->max_amount} pour cet opérateur."],
+            ]);
+        }
+
+        return $operator;
+    }
+
+    /**
+     * Calcule le frais réel configuré pour l'opérateur (frais fixe + pourcentage du montant).
+     */
+    private function computeOperatorFee(Operator $operator, float $amount): float
+    {
+        return round((float) $operator->fixed_fee + ($amount * (float) $operator->percent_fee), 2);
     }
 
     /**
@@ -259,10 +302,10 @@ public function initiateWithdrawal(WithdrawalRequest $request)
         try {
             $user = Auth::user();
 
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
-                    'status'  => 'error',
-                    'message' => 'Unauthenticated.'
+                    'status' => 'error',
+                    'message' => 'Unauthenticated.',
                 ], 401);
             }
 
@@ -273,12 +316,12 @@ public function initiateWithdrawal(WithdrawalRequest $request)
 
             return response()->json([
                 'status' => 'success',
-                'data'   => $transactions
+                'data' => $transactions,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
-                'status'  => 'error',
-                'message' => 'Erreur lors de la récupération des transactions.'
+                'status' => 'error',
+                'message' => 'Erreur lors de la récupération des transactions.',
             ], 500);
         }
     }
@@ -286,18 +329,18 @@ public function initiateWithdrawal(WithdrawalRequest $request)
     /**
      * GET /api/history?page=1&type=all
      * Historique complet filtré par marchand avec pagination
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     *
+     * @return JsonResponse
      */
     public function historyList(Request $request)
     {
         try {
             $user = Auth::user();
 
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
-                    'status'  => 'error',
-                    'message' => 'Unauthenticated.'
+                    'status' => 'error',
+                    'message' => 'Unauthenticated.',
                 ], 401);
             }
 
@@ -313,16 +356,36 @@ public function initiateWithdrawal(WithdrawalRequest $request)
 
             return response()->json([
                 'status' => 'success',
-                'type'   => $type,
-                'data'   => $transactions
+                'type' => $type,
+                'data' => $transactions,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
-                'status'  => 'error',
-                'message' => 'Impossible de charger l\'historique.'
+                'status' => 'error',
+                'message' => 'Impossible de charger l\'historique.',
             ], 500);
         }
     }
+
+    /**
+     * GET /api/get_request?request_id=...
+     * Alias historique de getTransactionStatus() basé sur un paramètre de requête
+     * (au lieu d'un paramètre de route), utilisé par certains clients existants.
+     */
+    public function checkStatus(Request $request)
+    {
+        $id = $request->query('request_id', $request->query('id'));
+
+        if (! $id) {
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Le paramètre request_id est requis.',
+            ], 422);
+        }
+
+        return $this->getTransactionStatus($id);
+    }
+
     /**
      * Récupérer le statut actuel d'une transaction pour le polling Flutter.
      *
@@ -337,31 +400,31 @@ public function initiateWithdrawal(WithdrawalRequest $request)
                 ->orWhere('id', $id)
                 ->first();
 
-            if (!$transaction) {
+            if (! $transaction) {
                 return response()->json([
                     'status' => 'failed',
-                    'message' => 'Transaction introuvable.'
+                    'message' => 'Transaction introuvable.',
                 ], 404);
             }
 
             // 2. Retour de la réponse structurée pour le WaitingScreen de Flutter
             return response()->json([
-                'status'  => $transaction->status, // 'success', 'pending', ou 'failed'
+                'status' => $transaction->status, // 'success', 'pending', ou 'failed'
                 'message' => $transaction->failure_reason ?? 'Statut de la transaction récupéré.',
-                'data'    => [
-                    'id'         => $transaction->id,
-                    'request_id' => $transaction->request_id,
-                    'amount'     => $transaction->amount,
-                    'number'     => $transaction->recipient_number,
-                    'carrier'    => $transaction->carrier,
+                'data' => [
+                    'id' => $transaction->id,
+                    'request_id' => $transaction->reference,
+                    'amount' => $transaction->amount_sent,
+                    'number' => $transaction->recipient_phone,
+                    'carrier' => $transaction->recipient_operator,
                     'updated_at' => $transaction->updated_at->toIso8601String(),
-                ]
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
-                'status'  => 'failed',
-                'message' => 'Erreur lors de la vérification du statut : ' . $e->getMessage()
+                'status' => 'failed',
+                'message' => 'Erreur lors de la vérification du statut : '.$e->getMessage(),
             ], 500);
         }
     }

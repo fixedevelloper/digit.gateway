@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Operator;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -21,7 +22,8 @@ class OperatorController extends Controller
 
         // Injecte dynamiquement l'URL absolue du logo pour Next.js
         $operators->transform(function ($operator) {
-            $operator->logo_url = $operator->logo ? asset('storage/' . $operator->logo) : null;
+            $operator->logo_url = $operator->logo ? asset('storage/'.$operator->logo) : null;
+
             return $operator;
         });
 
@@ -30,22 +32,24 @@ class OperatorController extends Controller
 
     /**
      * Enregistre une nouvelle infrastructure réseau (Opérateur).
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     *
+     * @return JsonResponse
      */
     public function store(Request $request)
     {
         $validatedData = $request->validate([
-            'name'         => 'required|string|max:100|unique:operators,name',
-            'code'         => 'required|string|max:50|unique:operators,code',
-            'country_id'   => 'required|exists:countries,id',
+            'name' => 'required|string|max:100|unique:operators,name',
+            'code' => 'required|string|max:50|unique:operators,code',
+            'country_id' => 'required|exists:countries,id',
             'prefix_regex' => 'nullable|string|max:255',
             'phone_length' => 'required|integer|min:1|max:15',
-            'fixed_fee'    => 'required|numeric|min:0',
-            'percent_fee'  => 'required|numeric|min:0|max:1',
-            'min_amount'   => 'required|numeric|min:0',
-            'max_amount'   => 'required|numeric|gt:min_amount',
-            'logo'         => 'nullable|image|mimes:jpeg,png,jpg,webp,svg|max:2048', // Max 2Mo
+            'fixed_fee' => 'required|numeric|min:0',
+            'percent_fee' => 'required|numeric|min:0|max:1',
+            'min_amount' => 'required|numeric|min:0',
+            'max_amount' => 'required|numeric|gt:min_amount',
+            // Pas de règle 'image' : elle rejette catégoriquement les SVG (protection XSS
+            // intégrée à Laravel), en contradiction avec 'mimes' qui les autorise explicitement.
+            'logo' => 'nullable|mimes:jpeg,png,jpg,webp,svg|max:2048', // Max 2Mo
         ]);
 
         // Gestion de l'upload du logo
@@ -62,21 +66,20 @@ class OperatorController extends Controller
 
         // Rechargement du pays associé et injection de l'URL absolue du logo
         $operator->load('country');
-        $operator->logo_url = $operator->logo ? asset('storage/' . $operator->logo) : null;
+        $operator->logo_url = $operator->logo ? asset('storage/'.$operator->logo) : null;
 
         return response()->json([
-            'status'  => 'success',
+            'status' => 'success',
             'message' => "L'opérateur {$operator->name} a été configuré et ajouté au corridor avec succès.",
-            'data'    => $operator
+            'data' => $operator,
         ], 201);
     }
 
     /**
      * Met à jour les configurations techniques, financières et le branding d'un opérateur.
      * Supporte l'envoi multipart/form-data via spoofing de méthode (_method=PUT).
-     * @param Request $request
-     * @param $id
-     * @return \Illuminate\Http\JsonResponse
+     *
+     * @return JsonResponse
      */
     public function update(Request $request, $id)
     {
@@ -85,17 +88,17 @@ class OperatorController extends Controller
         logger($request->all());
         // Validation stricte incluant l'unicité du nom et du code (excluant l'id courant)
         $validatedData = $request->validate([
-            'name'         => ['sometimes', 'string', 'max:100', Rule::unique('operators')->ignore($operator->id)],
-            'code'         => ['sometimes', 'string', 'max:50', Rule::unique('operators')->ignore($operator->id)],
-            'country_id'   => 'sometimes|exists:countries,id',
-            'status'       => 'sometimes|boolean',
+            'name' => ['sometimes', 'string', 'max:100', Rule::unique('operators')->ignore($operator->id)],
+            'code' => ['sometimes', 'string', 'max:50', Rule::unique('operators')->ignore($operator->id)],
+            'country_id' => 'sometimes|exists:countries,id',
+            'status' => 'sometimes|boolean',
             'prefix_regex' => 'sometimes|nullable|string|max:255',
             'phone_length' => 'sometimes|integer|min:1|max:15',
-            'fixed_fee'    => 'sometimes|numeric|min:0',
-            'percent_fee'  => 'sometimes|numeric|min:0|max:1',
-            'min_amount'   => 'sometimes|numeric|min:0',
-            'max_amount'   => 'sometimes|numeric|gt:min_amount',
-            'logo'         => 'sometimes|nullable|image|mimes:jpeg,png,jpg,webp,svg|max:2048',
+            'fixed_fee' => 'sometimes|numeric|min:0',
+            'percent_fee' => 'sometimes|numeric|min:0|max:1',
+            'min_amount' => 'sometimes|numeric|min:0',
+            'max_amount' => 'sometimes|numeric|gt:min_amount',
+            'logo' => 'sometimes|nullable|mimes:jpeg,png,jpg,webp,svg|max:2048',
         ]);
 
         // Gestion de l'upload du nouveau logo
@@ -115,12 +118,12 @@ class OperatorController extends Controller
 
         // On recharge la relation et on injecte le lien absolu
         $operator->load('country');
-        $operator->logo_url = $operator->logo ? asset('storage/' . $operator->logo) : null;
+        $operator->logo_url = $operator->logo ? asset('storage/'.$operator->logo) : null;
 
         return response()->json([
-            'status'  => 'success',
+            'status' => 'success',
             'message' => "Configuration de la passerelle {$operator->name} mise à jour avec succès.",
-            'data'    => $operator
+            'data' => $operator,
         ], 200);
     }
 }

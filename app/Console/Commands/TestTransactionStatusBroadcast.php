@@ -25,8 +25,9 @@ class TestTransactionStatusBroadcast extends Command
 
         $transaction = Transaction::where('reference', $reference)->first();
 
-        if (!$transaction) {
+        if (! $transaction) {
             $this->error("❌ Aucune transaction trouvée avec la référence : {$reference}");
+
             return Command::FAILURE;
         }
 
@@ -38,15 +39,15 @@ class TestTransactionStatusBroadcast extends Command
         // Diffusion réelle sur le canal Reverb (c'est ça que tu veux tester)
         try {
             TransactionStatusUpdated::dispatch($transaction);
-            $this->info("✅ dispatch() exécuté sans exception");
+            $this->info('✅ dispatch() exécuté sans exception');
         } catch (\Throwable $e) {
-            $this->error("❌ Exception lors du dispatch : " . $e->getMessage());
+            $this->error('❌ Exception lors du dispatch : '.$e->getMessage());
             Log::error('[test-broadcast] Exception', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
         }
         Log::info('[Broadcast Dispatch] Event TransactionStatusUpdated diffusé', [
-            'channel'   => 'user.' . $transaction->user_id,
+            'channel' => 'user.'.$transaction->user_id,
             'reference' => $transaction->reference,
-            'status'    => $transaction->status,
+            'status' => $transaction->status,
         ]);
         $this->info("📡 Event 'TransactionStatusUpdated' diffusé sur le canal user.{$transaction->user_id}");
 

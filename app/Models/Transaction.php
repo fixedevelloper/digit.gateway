@@ -19,6 +19,7 @@ class Transaction extends Model
         'reference',
         'type',
         'user_id',
+        'agency_id',
         'recipient_id',
         'recipient_phone',
         'recipient_operator',
@@ -49,6 +50,7 @@ class Transaction extends Model
     {
         return $this->belongsTo(Recipient::class);
     }
+
     /**
      * Obtenir l'agence associée à cette transaction.
      */

@@ -38,8 +38,8 @@ class TransactionStatusUpdatedPublic implements ShouldBroadcastNow
     {
         $payload = [
             'reference' => $this->transaction->reference,
-            'status'    => $this->transaction->status,
-            'amount'    => $this->transaction->amount_to_receive,
+            'status' => $this->transaction->status,
+            'amount' => $this->transaction->amount_to_receive,
         ];
 
         Log::info('[TransactionStatusUpdatedPublic] 📦 Payload à diffuser (canal public)', $payload);

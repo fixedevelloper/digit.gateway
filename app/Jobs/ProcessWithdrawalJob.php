@@ -2,14 +2,16 @@
 
 namespace App\Jobs;
 
+use App\Contracts\PaymentGatewayContract;
 use App\Models\Transaction;
-use App\Services\DigitwaveService;
+use App\Services\CarrierRouter;
+use App\Support\Phone;
+use Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Exception;
 
 class ProcessWithdrawalJob implements ShouldQueue
 {
@@ -33,12 +35,13 @@ class ProcessWithdrawalJob implements ShouldQueue
     }
 
     /**
-     * Exécute le Job.
-     * Laravel injecte automatiquement DigitwaveService ici.
-     * @param DigitwaveService $digitwaveService
+     * Exécute le Job. Laravel injecte le fournisseur de paiement lié dans
+     * AppServiceProvider (Digitwave aujourd'hui) via le contrat, et le
+     * routeur d'opérateur, tous deux automatiquement.
+     *
      * @throws Exception
      */
-    public function handle(DigitwaveService $digitwaveService): void
+    public function handle(PaymentGatewayContract $gateway, CarrierRouter $carrierRouter): void
     {
         // On ne traite la demande de débit que si elle est encore en attente
         if ($this->transaction->status !== 'pending') {
@@ -52,28 +55,22 @@ class ProcessWithdrawalJob implements ShouldQueue
             // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
             $country = trim($this->transaction->country_name);
 
-            // 2. Détermination de l'opérateur (Forcé pour le Congo)
-            if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
-               // $carrier = 'MTN-CG';
-                $carrier = 'RESEAU CHARISMATIQUE';
+            // 2. Détermination de l'opérateur : respecte l'éventuelle bascule manuelle
+            // configurée par l'admin pour ce pays (dashboard > Corridors), sinon
+            // utilise l'opérateur choisi par l'expéditeur.
+            $carrier = $carrierRouter->resolve($this->transaction);
 
-                // Un petit log pour confirmer la redirection en production
-                logger()->info("[Redirection Congo] Transaction {$this->transaction->reference} redirigée vers RESEAU CHARISMATIQUE.");
-            } else {
-                $carrier = $this->transaction->recipient_operator;
-            }
-
-            // LOG DEBUG : Permet de voir exactement ce qui est envoyé au SDK/Service Digitwave
-            logger()->info("Envoi Digitwave", [
+            // Permet de voir exactement ce qui est envoyé au fournisseur de paiement
+            logger()->info('Envoi Digitwave', [
                 'ref' => $this->transaction->reference,
                 'country' => $country,
                 'carrier' => $carrier,
-                'phone' => $this->transaction->recipient_phone,
-                'amount' => $totalDebitAmount
+                'phone' => Phone::mask($this->transaction->recipient_phone),
+                'amount' => $totalDebitAmount,
             ]);
 
-            // Appel de la méthode du service
-            $result = $digitwaveService->requestWithdrawal(
+            // Appel du fournisseur de paiement lié
+            $result = $gateway->requestWithdrawal(
                 $this->transaction->reference,
                 $country,
                 $carrier,
@@ -81,19 +78,19 @@ class ProcessWithdrawalJob implements ShouldQueue
                 $totalDebitAmount
             );
 
-            logger()->info("Réponse Digitwave", ['ref' => $this->transaction->reference, 'response' => $result]);
+            logger()->info('Réponse Digitwave', ['ref' => $this->transaction->reference, 'response' => $result->raw]);
 
-            if (isset($result['success']) && $result['success'] === true) {
+            if ($result->success) {
                 $this->transaction->update([
                     'status' => 'processing',
-                    'gateway_reference' => $result['request_id'] ?? null
+                    'gateway_reference' => $result->requestId,
                 ]);
             } else {
-                $this->failTransaction($result['message'] ?? 'Rejected by operator gateway');
+                $this->failTransaction($result->message ?? 'Rejected by operator gateway');
             }
 
         } catch (Exception $e) {
-            logger()->error("Withdrawal Job Error [{$this->transaction->reference}]: " . $e->getMessage());
+            logger()->error("Withdrawal Job Error [{$this->transaction->reference}]: ".$e->getMessage());
             throw $e;
         }
     }
@@ -105,10 +102,25 @@ class ProcessWithdrawalJob implements ShouldQueue
     {
         $this->transaction->update([
             'status' => 'failed',
-            'failure_reason' => $reason
+            'failure_reason' => $reason,
         ]);
 
-        logger()->warning("Demande de retrait échouée pour {$this->transaction->reference}. Raison : {$reason}");
+        // RECONCILIATION : seuls les retraits ('withdrawal') sont débités du wallet au moment
+        // de la requête (TransferController::initiateWithdrawal). Les dépôts ('deposit'), traités
+        // par ce même Job, ne touchent jamais le wallet à la création : les rembourser créditerait
+        // un montant qui n'a jamais été prélevé.
+        if ($this->transaction->type !== 'withdrawal') {
+            logger()->warning("Demande échouée pour {$this->transaction->reference} (type: {$this->transaction->type}). Raison : {$reason}.");
+
+            return;
+        }
+
+        $wallet = $this->transaction->user->wallet;
+        $totalRefund = $this->transaction->amount_sent + $this->transaction->fees;
+
+        $wallet->increment('balance', $totalRefund);
+
+        logger()->warning("Demande de retrait échouée pour {$this->transaction->reference}. Raison : {$reason}. Utilisateur remboursé de : {$totalRefund}.");
     }
 
     /**

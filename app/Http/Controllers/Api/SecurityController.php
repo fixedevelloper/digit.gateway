@@ -4,34 +4,33 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class SecurityController extends Controller
 {
     /**
      * Authentification de l'administrateur et génération du jeton de session.
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     *
+     * @return JsonResponse
+     *
      * @throws ValidationException
      */
     public function login(Request $request)
     {
-        logger($request->all());
         // 1. Validation stricte des entrées (Format téléphone et mot de passe)
         $credentials = $request->validate([
-            'phone'    => 'required|string',
+            'phone' => 'required|string',
             'password' => 'required|string|min:6',
         ]);
 
-        logger($credentials);
         // 2. Recherche de l'utilisateur par son numéro de téléphone
         $user = User::where('phone', $credentials['phone'])->first();
 
         // 3. Vérification des identifiants et restriction stricte aux administrateurs
-        if (!$user || !Hash::check($credentials['password'], $user->password)) {
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'phone' => ['Les identifiants fournis sont incorrects.'],
             ]);
@@ -41,8 +40,8 @@ class SecurityController extends Controller
         // (Adapte cette ligne selon ta structure de rôles : $user->is_admin ou un package comme Spatie Roles)
         if ($user->role !== 'admin' && $user->role !== 'superadmin') {
             return response()->json([
-                'status'  => 'error',
-                'message' => 'Accès refusé. Cette console est strictement réservée aux administrateurs.'
+                'status' => 'error',
+                'message' => 'Accès refusé. Cette console est strictement réservée aux administrateurs.',
             ], 403);
         }
 
@@ -52,14 +51,14 @@ class SecurityController extends Controller
 
         // 6. Réponse structurée consommée par notre interceptor Axios Next.js
         return response()->json([
-            'status'  => 'success',
-            'token'   => $token,
-            'user'    => [
-                'id'    => $user->id,
-                'name'  => $user->name,
+            'status' => 'success',
+            'token' => $token,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
                 'phone' => $user->phone,
-                'role'  => $user->role
-            ]
+                'role' => $user->role,
+            ],
         ], 200);
     }
 
@@ -72,8 +71,8 @@ class SecurityController extends Controller
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
-            'status'  => 'success',
-            'message' => 'Session d\'administration fermée et jeton révoqué avec succès.'
+            'status' => 'success',
+            'message' => 'Session d\'administration fermée et jeton révoqué avec succès.',
         ], 200);
     }
 }

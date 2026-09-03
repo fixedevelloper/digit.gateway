@@ -46,11 +46,12 @@ class CreateAgencyCommand extends Command
         // Vérification si le code existe déjà
         if (Agency::where('code', $code)->exists()) {
             $this->error("Une agence avec le code [{$code}] existe déjà !");
+
             return Command::FAILURE;
         }
 
         // Demande de confirmation des détails dans le terminal
-        $this->info("Détails de la nouvelle agence :");
+        $this->info('Détails de la nouvelle agence :');
         $this->line("Nom : {$name}");
         $this->line("Ville : {$city}");
         $this->line("Code généré (pour le QR Code) : {$code}");
@@ -65,10 +66,12 @@ class CreateAgencyCommand extends Command
 
             $this->info("L'agence [{$agency->name}] a été créée avec succès !");
             $this->info("Code à mettre dans votre générateur de QR Code : {$agency->code}");
+
             return Command::SUCCESS;
         }
 
-        $this->warn("Création annulée.");
+        $this->warn('Création annulée.');
+
         return Command::INVALID;
     }
 }
@@ -76,6 +79,7 @@ class CreateAgencyCommand extends Command
 /**
  * Fonction d'aide pour nettoyer la chaîne pour le préfixe de la ville
  */
-function clean_string($string) {
+function clean_string($string)
+{
     return preg_replace('/[^A-Za-z0-9\-]/', '', $string);
 }

@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Middleware\CheckAdminRole;
+use App\Http\Middleware\PreventDuplicateRequest;
+use App\Http\Middleware\VerifyTransactionPin;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -14,7 +17,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        $middleware->alias([
+            'admin.role' => CheckAdminRole::class,
+            'pin.verify' => VerifyTransactionPin::class,
+            'idempotent' => PreventDuplicateRequest::class,
+        ]);
     })
     ->withBroadcasting(
         __DIR__.'/../routes/channels.php',

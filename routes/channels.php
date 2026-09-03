@@ -20,5 +20,6 @@ Broadcast::channel('private-user.{id}', function ($user, $id) {
         'user_id' => $user->id,
         'channel_id' => $id,
     ]);
+
     return true;
 });

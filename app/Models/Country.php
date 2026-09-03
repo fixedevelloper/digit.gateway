@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Country extends Model
 {
@@ -23,6 +25,7 @@ class Country extends Model
         'phonecode',
         'status',
         'flag',
+        'forced_operator_id',
     ];
 
     /**
@@ -48,12 +51,19 @@ class Country extends Model
     }
 
     /**
- * Obtenir les opérateurs disponibles pour ce pays.
- *
- * @return \Illuminate\Database\Eloquent\Relations\HasMany
- */
-public function operators(): \Illuminate\Database\Eloquent\Relations\HasMany
-{
-    return $this->hasMany(Operator::class)->where('status', true);
-}
+     * Obtenir les opérateurs disponibles pour ce pays.
+     */
+    public function operators(): HasMany
+    {
+        return $this->hasMany(Operator::class)->where('status', true);
+    }
+
+    /**
+     * Opérateur forcé manuellement par l'admin pour ce pays (bascule d'urgence).
+     * Quand renseigné, il prend le pas sur l'opérateur choisi par l'expéditeur.
+     */
+    public function forcedOperator(): BelongsTo
+    {
+        return $this->belongsTo(Operator::class, 'forced_operator_id');
+    }
 }

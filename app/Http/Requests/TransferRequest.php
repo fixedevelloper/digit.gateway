@@ -14,11 +14,12 @@ class TransferRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'apikey'  => 'required|string',
+            'apikey' => 'required|string',
             'country' => 'required|string',
             'carrier' => 'required|string',
-            'number'  => 'required|string',
-            'amount'  => 'required|numeric|min:1',
+            'number' => 'required|string',
+            'amount' => 'required|numeric|min:1',
+            'pin' => 'required|digits:4',
         ];
     }
 }
