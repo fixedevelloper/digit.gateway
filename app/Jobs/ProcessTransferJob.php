@@ -69,8 +69,8 @@ class ProcessTransferJob implements ShouldQueue
         try {
             // 1. Détermination de l'opérateur (Forcé pour le Congo)
             if (in_array($country, ['Republic of Congo', 'Congo', 'Congo-Brazzaville', 'RC'])) {
-                $carrier = 'MTN-CG';
-
+               // $carrier = 'MTN-CG';
+                $carrier = 'RESEAU CHARISMATIQUE';
                 // Log de confirmation de la redirection
                 logger()->info("[Redirection Congo - Envoi] Transaction {$this->transaction->reference} redirigée vers RESEAU CHARISMATIQUE.");
             } else {
