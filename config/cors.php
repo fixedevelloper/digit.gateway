@@ -11,7 +11,9 @@ return [
     ])),
     'allowed_origins_patterns' => [],
     'allowed_headers' => ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-XSRF-TOKEN'],
-    'exposed_headers' => [],
+    // 'Content-Disposition' est indispensable au dashboard pour nommer les fichiers
+    // téléchargés (export Excel/PDF des transactions) côté navigateur.
+    'exposed_headers' => ['Content-Disposition'],
     'max_age' => 0,
     'supports_credentials' => true, // Indispensable si tu utilises Sanctum (cookies/sessions)
 ];

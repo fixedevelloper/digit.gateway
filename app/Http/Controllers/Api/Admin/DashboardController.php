@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Transaction; // Ajuste selon le nom de ton modèle de transactions
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -34,7 +35,10 @@ class DashboardController extends Controller
             ? round(($successfulTransactionsCount / $totalTransactions) * 100, 1)
             : 100.0;
 
-        // 4. Génération de l'historique des 7 derniers jours (Crédit vs Débit)
+        // 4. Nombre de comptes utilisateurs actifs (status = true)
+        $activeAccountsCount = User::where('status', true)->count();
+
+        // 5. Génération de l'historique des 7 derniers jours (Crédit vs Débit)
         $sevenDaysAgo = Carbon::now()->subDays(6)->startOfDay();
 
         // Requête groupée par jour et par type de transaction.
@@ -64,14 +68,14 @@ class DashboardController extends Controller
             ];
         }
 
+        // Réponse à plat, alignée sur la convention des autres contrôleurs admin
+        // (WalletController, MerchantController, etc. renvoient déjà le payload sans wrapper).
         return response()->json([
-            'status' => 'success',
-            'data' => [
-                'monthlyVolume' => (float) $monthlyVolume,
-                'successfulTransactionsCount' => $successfulTransactionsCount,
-                'successRate' => $successRate,
-                'dailyHistory' => $dailyHistory,
-            ],
+            'monthlyVolume' => (float) $monthlyVolume,
+            'successfulTransactionsCount' => $successfulTransactionsCount,
+            'successRate' => $successRate,
+            'activeAccountsCount' => $activeAccountsCount,
+            'dailyHistory' => $dailyHistory,
         ]);
     }
 }

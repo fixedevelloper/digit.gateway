@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\MerchantController;
 use App\Http\Controllers\Api\Admin\OperatorController;
 use App\Http\Controllers\Api\Admin\TransactionController;
+use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Admin\WalletController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CountryController;
@@ -101,11 +102,19 @@ $registerApiRoutes = function () {
 
         // Journal d'Audit Global (Transactions de la passerelle)
         Route::get('/transactions', [TransactionController::class, 'index']);
+        Route::get('/transactions/export/excel', [TransactionController::class, 'exportExcel']);
+        Route::get('/transactions/export/pdf', [TransactionController::class, 'exportPdf']);
         Route::get('/dashboard/stats', [DashboardController::class, 'getStats']);
 
         // Gestion des Marchands B2B (intégrateurs de la passerelle)
         Route::get('/merchants', [MerchantController::class, 'index']);
         Route::put('/merchants/{id}', [MerchantController::class, 'update']);
+
+        // Gestion des Utilisateurs (clients mobile money de l'app Flutter)
+        Route::get('/users', [AdminUserController::class, 'index']);
+        Route::put('/users/{id}', [AdminUserController::class, 'update']);
+        // Réinitialisation manuelle : demande reçue par l'admin via WhatsApp
+        Route::post('/users/{id}/generate-password', [AdminUserController::class, 'generatePassword']);
     });
 };
 
