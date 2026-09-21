@@ -8,8 +8,11 @@ use App\Models\Country;
 class CountryController extends Controller
 {
     /**
-     * Récupérer la liste de tous les pays actifs pour l'application mobile.
-     * Idéal pour alimenter un sélecteur de pays/devises (ex: CM, CI, SN).
+     * Lister les pays et opérateurs disponibles
+     *
+     * Retourne les pays actifs avec leurs opérateurs mobile money actifs (`carriers`).
+     * Utilisé pour alimenter un sélecteur pays/opérateur avant un transfert, retrait ou
+     * dépôt (les valeurs `country`/`carrier` attendues par ces endpoints en proviennent).
      */
     public function index()
     {
@@ -47,7 +50,9 @@ class CountryController extends Controller
     }
 
     /**
-     * Récupérer les détails d'un pays spécifique via son code ISO (ex: CM).
+     * Détails d'un pays
+     *
+     * Récupère un pays spécifique via son code ISO (ex: CM, CI, SN).
      */
     public function show($iso)
     {

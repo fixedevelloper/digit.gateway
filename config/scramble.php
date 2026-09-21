@@ -7,10 +7,12 @@ return [
     /*
      * Which routes to document. String or array form; use Scramble::routes() for custom selection.
      *
-     * 'api_path' => [
-     *     'include' => 'api',
-     *     'exclude' => ['api/internal'],
-     * ],
+     * Restreint volontairement à /api/v1/gateway/* : /docs/api est la doc publique
+     * remise aux marchands, elle ne doit exposer que les endpoints qu'ils appellent
+     * réellement pour effectuer leurs transactions (transferts, retraits, dépôts,
+     * statut, pays/opérateurs) — ni les routes internes de l'app mobile (Sanctum),
+     * ni celles de la console admin, ni même celles d'inscription/gestion des clés
+     * API marchande (documentées dans le portail self-service, pas ici).
      *
      * Without *, patterns match path segments (api matches api and api/users, not apiary).
      * With *, Str::is is used (e.g. api/v*).
@@ -19,7 +21,9 @@ return [
      * Multiple includes or wildcards → server defaults to / and paths stay full (/api/users).
      * Override with `servers`, or use Scramble::registerApi() for separate bases.
      */
-    'api_path' => 'api',
+    'api_path' => [
+        'include' => 'api/v1/gateway',
+    ],
 
     /*
      * Your API domain. By default, app domain is used. This is also a part of the default API routes
@@ -51,8 +55,11 @@ return [
         /*
          * Description rendered on the home page of the API documentation (`/docs/api`).
          */
-        'description' => 'API de transfert et de retrait mobile money (passerelle Digitwave). '
-            .'Authentification par jeton Sanctum (Bearer) sauf indication contraire.',
+        'description' => 'API gateway B2B de transfert et de retrait mobile money (passerelle Digitwave), '
+            .'pour une intégration serveur-à-serveur. Authentification par clé API marchande via '
+            .'`Authorization: Bearer sk_test_...` (sandbox) ou `sk_live_...` (production), obtenue depuis '
+            .'l\'espace self-service (créez un compte puis générez une clé). '
+            .'Les endpoints de transfert/retrait/dépôt nécessitent l\'en-tête `Idempotency-Key`.',
     ],
 
     'ui' => [
@@ -179,5 +186,12 @@ return [
      *     ],
      * ],
      */
-    'security_strategy' => MiddlewareAuthSecurityStrategy::class,
+    'security_strategy' => [
+        MiddlewareAuthSecurityStrategy::class,
+        [
+            // Seules les routes /v1/gateway/* (clé API marchande, middleware 'auth.apikey')
+            // sont documentées ici — cf. api_path ci-dessus.
+            'middleware' => ['auth.apikey*'],
+        ],
+    ],
 ];

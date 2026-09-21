@@ -37,5 +37,17 @@ return [
     'digitwave' => [
         'url' => env('DIGITWAVE_BASE_URL', 'https://digitwave-services.com/api/'),
         'api_key' => env('DIGITWAVE_API_KEY'),
+        // Secret HMAC (préfixe 'agswhsec_') fourni par le dashboard Digitwave, utilisé
+        // pour vérifier l'en-tête X-Webhook-Signature des notifications entrantes.
+        'webhook_secret' => env('DIGITWAVE_WEBHOOK_SECRET'),
+    ],
+
+    /*
+     * Sous-domaine dédié à la doc API marchande (/docs/api), ex: docs.digitgateway.com.
+     * Laissé vide en local : la doc reste servie sur le même domaine que l'API,
+     * à /docs/api. Voir App\Providers\AppServiceProvider::boot().
+     */
+    'docs' => [
+        'domain' => env('DOCS_DOMAIN'),
     ],
 ];

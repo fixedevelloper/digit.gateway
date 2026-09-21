@@ -20,7 +20,9 @@ class WithdrawalRequest extends FormRequest
             'carrier' => 'required|string',
             'number' => 'required|string',
             'amount' => 'required|numeric|min:1',
-            'pin' => 'required|digits:4',
+            // Requis uniquement sur les routes mobile (Sanctum + middleware 'pin.verify').
+            // Les routes /v1/gateway/* (clé API) n'en imposent pas : la clé API est le secret.
+            'pin' => 'sometimes|digits:4',
         ];
     }
 }

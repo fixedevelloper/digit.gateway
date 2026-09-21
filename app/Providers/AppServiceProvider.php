@@ -4,8 +4,10 @@ namespace App\Providers;
 
 use App\Contracts\PaymentGatewayContract;
 use App\Services\Gateways\DigitwaveGateway;
+use Dedoc\Scramble\Scramble;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -33,5 +35,19 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('auth', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip().'|'.$request->input('phone'));
         });
+
+        // Sert la doc marchande sur un sous-domaine dédié (services.docs.domain /
+        // DOCS_DOMAIN) plutôt que /docs/api sur le domaine principal, quand configuré.
+        // Rien ne change en local (var absente) : la doc reste sur /docs/api.
+        if ($docsDomain = config('services.docs.domain')) {
+            Scramble::configure()->expose(
+                ui: fn (Router $router, $action) => $router->get('/', $action)
+                    ->domain($docsDomain)
+                    ->name('scramble.docs.ui'),
+                document: fn (Router $router, $action) => $router->get('/api.json', $action)
+                    ->domain($docsDomain)
+                    ->name('scramble.docs.document'),
+            );
+        }
     }
 }

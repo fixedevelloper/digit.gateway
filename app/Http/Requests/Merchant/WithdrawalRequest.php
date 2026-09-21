@@ -1,10 +1,13 @@
 <?php
 
-namespace App\Http\Requests;
+namespace App\Http\Requests\Merchant;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class DepositRequest extends FormRequest
+/**
+ * Contrat d'entrée dédié à POST /v1/gateway/withdrawals (intégration B2B).
+ */
+class WithdrawalRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -14,14 +17,11 @@ class DepositRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'apikey' => 'sometimes|nullable|string',
             'country' => 'required|string',
+            'agensic_code' => 'required|string',
             'carrier' => 'required|string',
             'number' => 'required|string',
             'amount' => 'required|numeric|min:1',
-            // Requis uniquement sur les routes mobile (Sanctum + middleware 'pin.verify').
-            // Les routes /v1/gateway/* (clé API) n'en imposent pas : la clé API est le secret.
-            'pin' => 'sometimes|digits:4',
         ];
     }
 }

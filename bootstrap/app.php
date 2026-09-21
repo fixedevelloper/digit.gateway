@@ -1,7 +1,11 @@
 <?php
 
+use App\Http\Middleware\ApiKeyAuth;
 use App\Http\Middleware\CheckAdminRole;
+use App\Http\Middleware\CheckMerchantRole;
+use App\Http\Middleware\Merchant\IdempotencyKey;
 use App\Http\Middleware\PreventDuplicateRequest;
+use App\Http\Middleware\VerifyDigitwaveSignature;
 use App\Http\Middleware\VerifyTransactionPin;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,8 +23,12 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'admin.role' => CheckAdminRole::class,
+            'merchant.role' => CheckMerchantRole::class,
+            'auth.apikey' => ApiKeyAuth::class,
+            'idempotency.key' => IdempotencyKey::class,
             'pin.verify' => VerifyTransactionPin::class,
             'idempotent' => PreventDuplicateRequest::class,
+            'verify.digitwave.signature' => VerifyDigitwaveSignature::class,
         ]);
     })
     ->withBroadcasting(

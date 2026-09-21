@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'password', 'phone', 'transaction_pin', 'email', 'company_name', 'environment', 'status'])]
+#[Fillable(['name', 'password', 'phone', 'transaction_pin', 'email', 'company_name', 'environment', 'status', 'role'])]
 #[Hidden(['password', 'remember_token', 'transaction_pin'])] // <- On cache aussi l'api_key des réponses JSON par sécurité
 class User extends Authenticatable
 {
@@ -63,5 +63,13 @@ class User extends Authenticatable
     public function recipients(): HasMany
     {
         return $this->hasMany(Recipient::class);
+    }
+
+    /**
+     * Clés API du compte marchand (espace self-service SaaS).
+     */
+    public function apiKeys(): HasMany
+    {
+        return $this->hasMany(ApiKey::class);
     }
 }

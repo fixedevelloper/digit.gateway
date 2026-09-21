@@ -8,9 +8,14 @@ use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Admin\WalletController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CountryController;
+use App\Http\Controllers\Api\Merchant\ApiKeyController;
+use App\Http\Controllers\Api\Merchant\AuthController as MerchantAuthController;
+use App\Http\Controllers\Api\Merchant\CountryController as MerchantCountryController;
+use App\Http\Controllers\Api\Merchant\TransferController as MerchantTransferController;
 use App\Http\Controllers\Api\SecurityController;
 use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -123,3 +128,70 @@ $registerApiRoutes();
 
 // Alias versionné /api/v1/* — strictement les mêmes routes.
 Route::prefix('v1')->group($registerApiRoutes);
+
+/*
+|--------------------------------------------------------------------------
+| Espace Self-Service Marchand (SaaS) — inscription, connexion, clés API
+|--------------------------------------------------------------------------
+| Distinct des routes 1/2/3 ci-dessus : un marchand crée ici son propre
+| compte (role='merchant') pour accéder à son dashboard et générer les
+| clés API qu'il utilisera pour appeler /api/v1/gateway/* depuis ses
+| propres serveurs.
+*/
+Route::prefix('merchants')->group(function () {
+    Route::middleware('throttle:auth')->group(function () {
+        Route::post('/register', [MerchantAuthController::class, 'register']);
+        Route::post('/login', [MerchantAuthController::class, 'login']);
+    });
+
+    Route::middleware(['auth:sanctum', 'merchant.role'])->group(function () {
+        Route::post('/logout', [MerchantAuthController::class, 'logout']);
+        Route::get('/profile', [MerchantAuthController::class, 'profile']);
+
+        Route::get('/api-keys', [ApiKeyController::class, 'index']);
+        Route::post('/api-keys', [ApiKeyController::class, 'store']);
+        Route::delete('/api-keys/{id}', [ApiKeyController::class, 'destroy']);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| API Gateway B2B (authentification par clé API — usage serveur-à-serveur)
+|--------------------------------------------------------------------------
+| Contrôleurs Api\Merchant\* dédiés — indépendants de Api\TransferController /
+| Api\CountryController (app mobile). Seule la logique de débit du wallet est
+| partagée (App\Services\TransactionService), la façade HTTP (validation,
+| format de réponse, idempotence) est propre à ce canal :
+| - pas de 'pin.verify' (la clé API est déjà le secret serveur-à-serveur) ;
+| - idempotence par en-tête 'Idempotency-Key' (middleware 'idempotency.key')
+|   plutôt que par fenêtre de 15s, sur les 3 routes POST.
+*/
+Route::prefix('v1/gateway')->group(function () {
+    Route::get('/countries', [MerchantCountryController::class, 'index'])
+        ->middleware('auth.apikey:countries.read');
+    Route::get('/countries/{iso}', [MerchantCountryController::class, 'show'])
+        ->middleware('auth.apikey:countries.read');
+
+    Route::post('/transfers', [MerchantTransferController::class, 'initiateTransfer'])
+        ->middleware(['auth.apikey:transfer.write', 'idempotency.key']);
+    Route::post('/withdrawals', [MerchantTransferController::class, 'initiateWithdrawal'])
+        ->middleware(['auth.apikey:withdrawal.write', 'idempotency.key']);
+    Route::post('/deposits', [MerchantTransferController::class, 'initiateDeposit'])
+        ->middleware(['auth.apikey:deposit.write', 'idempotency.key']);
+
+    Route::get('/transactions', [MerchantTransferController::class, 'index'])
+        ->middleware('auth.apikey:transactions.read');
+    Route::get('/transactions/{reference}', [MerchantTransferController::class, 'show'])
+        ->middleware('auth.apikey:transactions.read');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Webhooks entrants (fournisseurs de paiement)
+|--------------------------------------------------------------------------
+| Route publique côté Sanctum (Digitwave n'a pas de token utilisateur) mais
+| authentifiée par signature HMAC (voir VerifyDigitwaveSignature). URL à
+| déclarer une seule fois dans le dashboard Digitwave — pas besoin d'alias /v1.
+*/
+Route::post('/webhooks/digitwave', [WebhookController::class, 'digitwave'])
+    ->middleware('verify.digitwave.signature');
