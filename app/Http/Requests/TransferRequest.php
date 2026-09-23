@@ -15,10 +15,15 @@ class TransferRequest extends FormRequest
     {
         return [
             'apikey' => 'sometimes|nullable|string',
-            'country' => 'required|string',
-            'carrier' => 'required|string',
+            'country' => 'required_without_all:operator_id,quote_id|string',
+            'carrier' => 'required_without_all:operator_id,quote_id|string',
             'number' => 'required|string',
             'amount' => 'required|numeric|min:1',
+            // Conversion de devises / opérateurs de même code en plusieurs devises :
+            // `operator_id` ou `currency` lève l'ambiguïté, `quote_id` valide une cotation (POST /quote).
+            'operator_id' => 'sometimes|nullable|integer',
+            'currency' => 'sometimes|nullable|string|size:3',
+            'quote_id' => 'sometimes|nullable|uuid',
             // Requis uniquement sur les routes mobile (Sanctum + middleware 'pin.verify').
             // Les routes /v1/gateway/* (clé API) n'en imposent pas : la clé API est le secret.
             'pin' => 'sometimes|digits:4',

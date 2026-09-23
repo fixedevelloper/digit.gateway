@@ -21,6 +21,7 @@ class Operator extends Model
         'country_id',
         'name',
         'code',
+        'currency',
         'logo',
         'status',
         'prefix_regex',

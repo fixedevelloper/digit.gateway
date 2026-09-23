@@ -49,8 +49,12 @@ class ProcessWithdrawalJob implements ShouldQueue
         }
 
         try {
-            // Calcul du montant total à collecter
-            $totalDebitAmount = (float) ($this->transaction->amount_sent + $this->transaction->fees);
+            // Montant total à collecter, dans la devise de l'opérateur. Si une conversion
+            // a eu lieu (ex: wallet XAF, opérateur USD), il est déjà calculé dans
+            // amount_to_receive ; sinon c'est le montant + les frais.
+            $totalDebitAmount = $this->transaction->currency_received !== $this->transaction->currency_sent
+                ? (float) $this->transaction->amount_to_receive
+                : (float) ($this->transaction->amount_sent + $this->transaction->fees);
 
             // 1. Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
             $country = trim($this->transaction->country_name);
@@ -67,6 +71,7 @@ class ProcessWithdrawalJob implements ShouldQueue
                 'carrier' => $carrier,
                 'phone' => Phone::mask($this->transaction->recipient_phone),
                 'amount' => $totalDebitAmount,
+                'currency' => $this->transaction->currency_received,
             ]);
 
             // Appel du fournisseur de paiement lié
@@ -75,7 +80,8 @@ class ProcessWithdrawalJob implements ShouldQueue
                 $country,
                 $carrier,
                 $this->transaction->recipient_phone,
-                $totalDebitAmount
+                $totalDebitAmount,
+                $this->transaction->currency_received
             );
 
             logger()->info('Réponse Digitwave', ['ref' => $this->transaction->reference, 'response' => $result->raw]);

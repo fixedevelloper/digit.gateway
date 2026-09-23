@@ -24,6 +24,8 @@ class Transaction extends Model
         'recipient_id',
         'recipient_phone',
         'recipient_operator',
+        'operator_id',
+        'quote_id',
         'amount_sent',
         'currency_sent',
         'fees',
@@ -50,6 +52,15 @@ class Transaction extends Model
     public function recipient(): BelongsTo
     {
         return $this->belongsTo(Recipient::class);
+    }
+
+    /**
+     * Opérateur réellement résolu à la création (distingue deux opérateurs de même
+     * code dans un pays, par devise). Null pour les transactions antérieures.
+     */
+    public function operator(): BelongsTo
+    {
+        return $this->belongsTo(Operator::class);
     }
 
     /**

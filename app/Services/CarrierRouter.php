@@ -29,6 +29,15 @@ class CarrierRouter
             ->first()
             ?->forcedOperator;
 
+        // L'opérateur forcé doit travailler dans la même devise que la transaction :
+        // le montant envoyé à Digitwave (amount_to_receive) est déjà converti.
+        if ($forcedOperator && $forcedOperator->status && $transaction->currency_received
+            && $forcedOperator->currency !== $transaction->currency_received) {
+            Log::warning("[Routage manuel admin] Opérateur forcé '{$forcedOperator->code}' ({$forcedOperator->currency}) ignoré pour la transaction {$transaction->reference} en {$transaction->currency_received}.");
+
+            return $transaction->recipient_operator;
+        }
+
         if ($forcedOperator && $forcedOperator->status) {
             Log::info("[Routage manuel admin] Transaction {$transaction->reference} redirigée vers l'opérateur forcé '{$forcedOperator->code}' pour '{$countryName}'.");
 

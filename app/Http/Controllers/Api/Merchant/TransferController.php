@@ -50,12 +50,14 @@ class TransferController extends Controller
     )]
     #[BodyParameter('country', description: 'Nom du pays (ex: "Republic of Congo") ou code ISO (ex: "CG") — voir GET /countries.', type: 'string', example: 'CG')]
     #[BodyParameter('carrier', description: 'Code opérateur retourné par GET /countries (carriers[].code), ex: "MTN_CG".', type: 'string', example: 'MTN_CG')]
+    #[BodyParameter('currency', description: 'Devise de l\'opérateur (carriers[].currency), requise seulement si le même code opérateur existe en plusieurs devises dans le pays.', type: 'string', example: 'USD')]
+    #[BodyParameter('quote_id', description: 'Identifiant de cotation renvoyé par POST /quotes. Obligatoire quand la devise de l\'opérateur diffère de celle du wallet (ex: wallet XAF, opérateur USD).', type: 'string', example: '9d3f1c2e-7a4b-4c1d-9e2f-1a2b3c4d5e6f')]
     public function initiateTransfer(TransferRequest $request): JsonResponse
     {
         try {
             $result = $this->transactions->createTransfer(
                 $request->user(),
-                $request->only(['country', 'carrier', 'number', 'amount']),
+                $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']),
                 'merchant_api'
             );
         } catch (TransactionValidationException $e) {
@@ -85,6 +87,8 @@ class TransferController extends Controller
     )]
     #[BodyParameter('country', description: 'Nom du pays (ex: "Republic of Congo") ou code ISO (ex: "CG") — voir GET /countries.', type: 'string', example: 'CG')]
     #[BodyParameter('carrier', description: 'Code opérateur retourné par GET /countries (carriers[].code), ex: "MTN_CG".', type: 'string', example: 'MTN_CG')]
+    #[BodyParameter('currency', description: 'Devise de l\'opérateur (carriers[].currency), requise seulement si le même code opérateur existe en plusieurs devises dans le pays.', type: 'string', example: 'USD')]
+    #[BodyParameter('quote_id', description: 'Identifiant de cotation renvoyé par POST /quotes. Obligatoire quand la devise de l\'opérateur diffère de celle du wallet (ex: wallet XAF, opérateur USD).', type: 'string', example: '9d3f1c2e-7a4b-4c1d-9e2f-1a2b3c4d5e6f')]
     public function initiateWithdrawal(WithdrawalRequest $request): JsonResponse
     {
         $agency = Agency::where('code', $request->agensic_code)
@@ -103,7 +107,7 @@ class TransferController extends Controller
             $result = $this->transactions->createWithdrawal(
                 $request->user(),
                 $agency,
-                $request->only(['country', 'carrier', 'number', 'amount']),
+                $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']),
                 'merchant_api'
             );
         } catch (TransactionValidationException $e) {
@@ -132,12 +136,14 @@ class TransferController extends Controller
     )]
     #[BodyParameter('country', description: 'Nom du pays (ex: "Republic of Congo") ou code ISO (ex: "CG") — voir GET /countries.', type: 'string', example: 'CG')]
     #[BodyParameter('carrier', description: 'Code opérateur retourné par GET /countries (carriers[].code), ex: "MTN_CG".', type: 'string', example: 'MTN_CG')]
+    #[BodyParameter('currency', description: 'Devise de l\'opérateur (carriers[].currency), requise seulement si le même code opérateur existe en plusieurs devises dans le pays.', type: 'string', example: 'USD')]
+    #[BodyParameter('quote_id', description: 'Identifiant de cotation renvoyé par POST /quotes. Obligatoire quand la devise de l\'opérateur diffère de celle du wallet (ex: wallet XAF, opérateur USD).', type: 'string', example: '9d3f1c2e-7a4b-4c1d-9e2f-1a2b3c4d5e6f')]
     public function initiateDeposit(DepositRequest $request): JsonResponse
     {
         try {
             $result = $this->transactions->createDeposit(
                 $request->user(),
-                $request->only(['country', 'carrier', 'number', 'amount']),
+                $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']),
                 'merchant_api'
             );
         } catch (TransactionValidationException $e) {
@@ -252,6 +258,9 @@ class TransferController extends Controller
             'amount' => (float) $transaction->amount_sent,
             'fee' => (float) $transaction->fees,
             'currency' => $transaction->currency_sent,
+            'amount_received' => (float) $transaction->amount_to_receive,
+            'currency_received' => $transaction->currency_received,
+            'exchange_rate' => (float) $transaction->exchange_rate,
             'recipient' => [
                 'phone' => $transaction->recipient_phone,
                 'operator' => $transaction->recipient_operator,

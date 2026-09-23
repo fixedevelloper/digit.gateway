@@ -19,6 +19,7 @@ class OperatorFactory extends Factory
             'country_id' => Country::factory(),
             'name' => fake()->company(),
             'code' => strtoupper(fake()->unique()->bothify('OP_????')),
+            'currency' => 'XAF',
             'status' => true,
             'prefix_regex' => null,
             'phone_length' => 9,

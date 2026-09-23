@@ -15,14 +15,15 @@ use App\Services\Gateways\GatewayResponse;
 interface PaymentGatewayContract
 {
     /**
-     * Envoyer de l'argent (Transfert / Payout).
+     * Envoyer de l'argent (Transfert / Payout). $amount est exprimé en $currency,
+     * la devise de l'opérateur (ex: USD après conversion depuis un wallet XAF).
      */
-    public function sendMoney(string $reference, string $country, string $carrier, string $number, float $amount): GatewayResponse;
+    public function sendMoney(string $reference, string $country, string $carrier, string $number, float $amount, string $currency): GatewayResponse;
 
     /**
-     * Demander un retrait (Collecte / Cash-In).
+     * Demander un retrait (Collecte / Cash-In). $amount est exprimé en $currency.
      */
-    public function requestWithdrawal(string $reference, string $country, string $carrier, string $number, float $amount): GatewayResponse;
+    public function requestWithdrawal(string $reference, string $country, string $carrier, string $number, float $amount, string $currency): GatewayResponse;
 
     /**
      * Vérifier le statut d'une requête déjà soumise.

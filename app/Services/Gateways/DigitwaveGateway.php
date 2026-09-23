@@ -37,7 +37,7 @@ class DigitwaveGateway implements PaymentGatewayContract
         $this->apiKey = config('services.digitwave.api_key');
     }
 
-    public function sendMoney(string $reference, string $country, string $carrier, string $number, float $amount): GatewayResponse
+    public function sendMoney(string $reference, string $country, string $carrier, string $number, float $amount, string $currency): GatewayResponse
     {
         Log::info('[GATEWAY - Envoi Mobile Money] Début du transfert.', [
             'reference' => $reference,
@@ -45,6 +45,7 @@ class DigitwaveGateway implements PaymentGatewayContract
             'carrier' => $carrier,
             'number' => Phone::mask($number),
             'amount' => $amount,
+            'currency' => $currency,
         ]);
 
         try {
@@ -53,6 +54,7 @@ class DigitwaveGateway implements PaymentGatewayContract
                 'carrier' => $carrier,
                 'number' => $number,
                 'amount' => $amount,
+                'currency' => $currency,
             ]);
 
             Log::info("[GATEWAY - Envoi Mobile Money] Réponse reçue de l'opérateur.", [
@@ -73,13 +75,14 @@ class DigitwaveGateway implements PaymentGatewayContract
         }
     }
 
-    public function requestWithdrawal(string $reference, string $country, string $carrier, string $number, float $amount): GatewayResponse
+    public function requestWithdrawal(string $reference, string $country, string $carrier, string $number, float $amount, string $currency): GatewayResponse
     {
         return $this->post('withdrawal', [
             'country' => $country,
             'carrier' => $carrier,
             'number' => $number,
             'amount' => $amount,
+            'currency' => $currency,
         ]);
     }
 

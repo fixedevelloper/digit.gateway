@@ -72,8 +72,12 @@ class CountryController extends Controller
             'currency' => $country->currency,
             'phonecode' => $country->phonecode,
             'carriers' => $country->operators->map(fn ($operator) => [
+                'id' => $operator->id,
                 'code' => $operator->code,
                 'name' => $operator->name,
+                // Devise des bornes/frais ci-dessous et du montant versé par l'opérateur.
+                // Différente de celle du wallet ⇒ cotation obligatoire (POST /quotes).
+                'currency' => $operator->currency,
                 'min_amount' => (float) $operator->min_amount,
                 'max_amount' => (float) $operator->max_amount,
                 'fixed_fee' => (float) $operator->fixed_fee,

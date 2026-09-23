@@ -24,7 +24,7 @@ class PreventDuplicateRequest
             'idemp:%s:%d:%s',
             $scope,
             Auth::id(),
-            md5((string) json_encode($request->only(['country', 'carrier', 'number', 'amount', 'agensic_code'])))
+            md5((string) json_encode($request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount', 'agensic_code'])))
         );
 
         if (! Cache::add($fingerprint, true, now()->addSeconds(self::LOCK_SECONDS))) {

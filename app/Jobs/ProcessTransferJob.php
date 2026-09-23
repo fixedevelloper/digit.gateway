@@ -72,6 +72,7 @@ class ProcessTransferJob implements ShouldQueue
                 'carrier_sent' => $carrier,
                 'phone' => Phone::mask($this->transaction->recipient_phone),
                 'amount' => (float) $this->transaction->amount_to_receive,
+                'currency' => $this->transaction->currency_received,
             ]);
 
             // Utilisation du fournisseur de paiement lié (avec $country nettoyé et $carrier déterminé)
@@ -80,7 +81,8 @@ class ProcessTransferJob implements ShouldQueue
                 $country,
                 $carrier,
                 $this->transaction->recipient_phone,
-                (float) $this->transaction->amount_to_receive
+                (float) $this->transaction->amount_to_receive,
+                $this->transaction->currency_received
             );
 
             logger()->info('Réponse Digitwave Envoi', ['ref' => $this->transaction->reference, 'response' => $result->raw]);
@@ -133,7 +135,7 @@ class ProcessTransferJob implements ShouldQueue
 
         $wallet->increment('balance', $totalRefund);
 
-        logger()->warning("Transfert échoué {$this->transaction->reference}. Utilisateur remboursé de : {$totalRefund} XAF");
+        logger()->warning("Transfert échoué {$this->transaction->reference}. Utilisateur remboursé de : {$totalRefund} {$this->transaction->currency_sent}");
     }
 
     /**

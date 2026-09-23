@@ -37,9 +37,18 @@ class OperatorController extends Controller
      */
     public function store(Request $request)
     {
+        // Un même code (ou nom) peut exister plusieurs fois dans un pays, une fois par
+        // devise (ex: VODACOM_CD en CDF et en USD). Par défaut : XAF, devise des wallets
+        // (aucune conversion).
+        $request->merge(['currency' => strtoupper((string) $request->input('currency', 'XAF'))]);
+        $sameCorridor = fn () => Rule::unique('operators')
+            ->where('country_id', $request->input('country_id'))
+            ->where('currency', $request->input('currency'));
+
         $validatedData = $request->validate([
-            'name' => 'required|string|max:100|unique:operators,name',
-            'code' => 'required|string|max:50|unique:operators,code',
+            'name' => ['required', 'string', 'max:100', $sameCorridor()],
+            'code' => ['required', 'string', 'max:50', $sameCorridor()],
+            'currency' => 'required|string|size:3|alpha',
             'country_id' => 'required|exists:countries,id',
             'prefix_regex' => 'nullable|string|max:255',
             'phone_length' => 'required|integer|min:1|max:15',
@@ -85,11 +94,27 @@ class OperatorController extends Controller
     {
         $operator = Operator::findOrFail($id);
 
-        logger($request->all());
-        // Validation stricte incluant l'unicité du nom et du code (excluant l'id courant)
+        if ($request->has('currency')) {
+            $request->merge(['currency' => strtoupper((string) $request->input('currency'))]);
+        }
+
+        // Changer de pays ou de devise peut créer un doublon de code : on force alors
+        // la vérification d'unicité du code actuel dans le nouveau corridor.
+        if ($request->hasAny(['country_id', 'currency'])) {
+            $request->mergeIfMissing(['code' => $operator->code]);
+        }
+
+        // Unicité du nom et du code par pays + devise (excluant l'id courant), évaluée
+        // sur les valeurs finales : celles envoyées, sinon celles déjà en base.
+        $sameCorridor = fn () => Rule::unique('operators')
+            ->where('country_id', $request->input('country_id', $operator->country_id))
+            ->where('currency', $request->input('currency', $operator->currency))
+            ->ignore($operator->id);
+
         $validatedData = $request->validate([
-            'name' => ['sometimes', 'string', 'max:100', Rule::unique('operators')->ignore($operator->id)],
-            'code' => ['sometimes', 'string', 'max:50', Rule::unique('operators')->ignore($operator->id)],
+            'name' => ['sometimes', 'string', 'max:100', $sameCorridor()],
+            'code' => ['sometimes', 'string', 'max:50', $sameCorridor()],
+            'currency' => 'sometimes|string|size:3|alpha',
             'country_id' => 'sometimes|exists:countries,id',
             'status' => 'sometimes|boolean',
             'prefix_regex' => 'sometimes|nullable|string|max:255',

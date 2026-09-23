@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\DashboardController;
+use App\Http\Controllers\Api\Admin\ExchangeRateController;
 use App\Http\Controllers\Api\Admin\MerchantController;
 use App\Http\Controllers\Api\Admin\OperatorController;
 use App\Http\Controllers\Api\Admin\TransactionController;
@@ -12,6 +13,7 @@ use App\Http\Controllers\Api\Merchant\ApiKeyController;
 use App\Http\Controllers\Api\Merchant\AuthController as MerchantAuthController;
 use App\Http\Controllers\Api\Merchant\CountryController as MerchantCountryController;
 use App\Http\Controllers\Api\Merchant\TransferController as MerchantTransferController;
+use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\SecurityController;
 use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\UserController;
@@ -58,6 +60,9 @@ $registerApiRoutes = function () {
         Route::get('/countries', [CountryController::class, 'index']);
         Route::get('/countries/{iso}', [CountryController::class, 'show']);
 
+        // Cotation (conversion XAF → devise de l'opérateur) avant validation d'une opération
+        Route::post('/quote', [QuoteController::class, 'store']);
+
         // Transactions (Payout & Cash-In)
         // 'pin.verify' vérifie le code PIN de transaction ; 'idempotent:<scope>' bloque les doublons
         // (double-tap, retry réseau) pendant quelques secondes, par utilisateur et par type d'opération.
@@ -94,6 +99,10 @@ $registerApiRoutes = function () {
         Route::get('/operators', [OperatorController::class, 'index']);
         Route::post('/operators', [OperatorController::class, 'store']);
         Route::put('/operators/{id}', [OperatorController::class, 'update']);
+
+        // Taux de change manuels (ajout seul : chaque modification crée une nouvelle ligne)
+        Route::get('/exchange-rates', [ExchangeRateController::class, 'index']);
+        Route::post('/exchange-rates', [ExchangeRateController::class, 'store']);
 
         // Gestion des Pays / Corridors régionaux
         Route::get('/countries', [App\Http\Controllers\Api\Admin\CountryController::class, 'index']);
@@ -171,6 +180,10 @@ Route::prefix('v1/gateway')->group(function () {
         ->middleware('auth.apikey:countries.read');
     Route::get('/countries/{iso}', [MerchantCountryController::class, 'show'])
         ->middleware('auth.apikey:countries.read');
+
+    // Scope vérifié dans le contrôleur selon le type coté ({type}.write).
+    Route::post('/quotes', [QuoteController::class, 'store'])
+        ->middleware('auth.apikey');
 
     Route::post('/transfers', [MerchantTransferController::class, 'initiateTransfer'])
         ->middleware(['auth.apikey:transfer.write', 'idempotency.key']);

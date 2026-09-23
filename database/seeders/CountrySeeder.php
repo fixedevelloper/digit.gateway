@@ -114,6 +114,7 @@ class CountrySeeder extends Seeder
                     [
                         'country_id' => $country->id,
                         'code' => $operatorData['code'],
+                        'currency' => $operatorData['currency'] ?? 'XAF',
                     ],
                     [
                         'name' => $operatorData['name'],

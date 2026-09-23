@@ -36,7 +36,7 @@ class TransferController extends Controller
         $amount = (float) $request->amount;
 
         try {
-            $result = $this->transactions->createTransfer($user, $request->only(['country', 'carrier', 'number', 'amount']));
+            $result = $this->transactions->createTransfer($user, $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']));
         } catch (ValidationException $e) {
             return response()->json([
                 'status' => 'error',
@@ -57,6 +57,10 @@ class TransferController extends Controller
             'amount' => $amount,
             'fee_charged' => $result['fee'],
             'total' => $result['total'],
+            'currency' => $result['transaction']->currency_sent,
+            'amount_received' => (float) $result['transaction']->amount_to_receive,
+            'currency_received' => $result['transaction']->currency_received,
+            'exchange_rate' => (float) $result['transaction']->exchange_rate,
             'remaining_balance' => (float) $result['balance'],
             'request_id' => $result['transaction']->reference,
         ], 200);
@@ -89,7 +93,7 @@ class TransferController extends Controller
         $amount = (float) $request->amount;
 
         try {
-            $result = $this->transactions->createWithdrawal($user, $agency, $request->only(['country', 'carrier', 'number', 'amount']));
+            $result = $this->transactions->createWithdrawal($user, $agency, $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']));
         } catch (ValidationException $e) {
             return response()->json([
                 'status' => 'error',
@@ -111,6 +115,10 @@ class TransferController extends Controller
             'amount' => $amount,
             'fee_charged' => $result['fee'],
             'total' => $result['total'],
+            'currency' => $result['transaction']->currency_sent,
+            'amount_received' => (float) $result['transaction']->amount_to_receive,
+            'currency_received' => $result['transaction']->currency_received,
+            'exchange_rate' => (float) $result['transaction']->exchange_rate,
             'remaining_balance' => (float) $result['balance'],
             'request_id' => $result['transaction']->reference,
         ], 200);
@@ -130,7 +138,7 @@ class TransferController extends Controller
         $amount = (float) $request->amount;
 
         try {
-            $result = $this->transactions->createDeposit($user, $request->only(['country', 'carrier', 'number', 'amount']));
+            $result = $this->transactions->createDeposit($user, $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']));
         } catch (ValidationException $e) {
             return response()->json([
                 'status' => 'error',
@@ -149,6 +157,10 @@ class TransferController extends Controller
             'amount' => $amount,
             'fee_charged' => $result['fee'],
             'total' => $result['total'],
+            'currency' => $result['transaction']->currency_sent,
+            'amount_received' => (float) $result['transaction']->amount_to_receive,
+            'currency_received' => $result['transaction']->currency_received,
+            'exchange_rate' => (float) $result['transaction']->exchange_rate,
             'remaining_balance' => (float) $result['balance'],
             'request_id' => $result['transaction']->reference,
         ], 200);
