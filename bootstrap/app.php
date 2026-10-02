@@ -21,6 +21,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // En production (deploy/), l'API est derrière Caddy puis nginx : sans cela,
+        // $request->ip() renverrait l'IP du proxy (limites throttle partagées par tous)
+        // et les URLs générées (asset(), logos) seraient en http://.
+        $middleware->trustProxies(at: '*');
+
         $middleware->alias([
             'admin.role' => CheckAdminRole::class,
             'merchant.role' => CheckMerchantRole::class,
