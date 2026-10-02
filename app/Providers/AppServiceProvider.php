@@ -8,6 +8,7 @@ use Dedoc\Scramble\Scramble;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -35,6 +36,10 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('auth', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip().'|'.$request->input('phone'));
         });
+
+        // La doc marchande est publique (restreinte aux routes /v1/gateway/*, cf.
+        // config/scramble.php) : sans ce gate, Scramble renvoie 403 hors environnement local.
+        Gate::define('viewApiDocs', fn ($user = null) => true);
 
         // Sert la doc marchande sur un sous-domaine dédié (services.docs.domain /
         // DOCS_DOMAIN) plutôt que /docs/api sur le domaine principal, quand configuré.

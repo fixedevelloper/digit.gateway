@@ -2,8 +2,10 @@
 # à une pile nginx/php-fpm de production, hors périmètre de cette étape.
 FROM php:8.3-cli-alpine
 
-RUN apk add --no-cache sqlite sqlite-dev icu-dev oniguruma-dev \
-    && docker-php-ext-install pdo pdo_sqlite pdo_mysql mbstring bcmath intl
+RUN apk add --no-cache git unzip sqlite sqlite-dev icu-dev oniguruma-dev \
+        libzip-dev libpng-dev libjpeg-turbo-dev freetype-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo pdo_sqlite pdo_mysql mbstring bcmath intl zip gd pcntl
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
