@@ -19,6 +19,7 @@ class Transaction extends Model
         'reference',
         'type',
         'channel',
+        'environment',
         'user_id',
         'agency_id',
         'recipient_id',
@@ -35,8 +36,46 @@ class Transaction extends Model
         'country_name',
         'status',
         'gateway_reference',
+        'submitted_at',
         'failure_reason',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'submitted_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * Représentation publique exposée aux marchands (API gateway et portail).
+     *
+     * @param  array<string, mixed>  $extra  champs ajoutés à la réponse (ex: solde restant)
+     * @return array<string, mixed>
+     */
+    public function toMerchantArray(array $extra = []): array
+    {
+        return array_merge([
+            'reference' => $this->reference,
+            'environment' => $this->environment,
+            'type' => $this->type,
+            'status' => $this->status,
+            'amount' => (float) $this->amount_sent,
+            'fee' => (float) $this->fees,
+            'currency' => $this->currency_sent,
+            'amount_received' => (float) $this->amount_to_receive,
+            'currency_received' => $this->currency_received,
+            'exchange_rate' => (float) $this->exchange_rate,
+            'recipient' => [
+                'phone' => $this->recipient_phone,
+                'operator' => $this->recipient_operator,
+                'country' => $this->country_name,
+            ],
+            'failure_reason' => $this->failure_reason,
+            'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
+        ], $extra);
+    }
 
     /**
      * Obtenir l'utilisateur (l'expéditeur) qui a initié la transaction.

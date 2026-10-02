@@ -356,9 +356,9 @@ class CurrencyConversionTest extends TestCase
     public function test_a_merchant_can_quote_and_transfer_through_the_gateway(): void
     {
         Queue::fake();
-        $merchant = User::factory()->merchant()->create();
+        $merchant = User::factory()->merchant()->create(['environment' => 'production']);
         $merchant->wallet()->update(['balance' => 20000]);
-        $key = ApiKey::generateFor($merchant, 'test', 'sandbox', ['transfer.write'])['plainTextKey'];
+        $key = ApiKey::generateFor($merchant, 'test', 'production', ['transfer.write'])['plainTextKey'];
         $headers = ['Authorization' => 'Bearer '.$key];
 
         $quote = $this->postJson('/api/v1/gateway/quotes', [

@@ -45,6 +45,13 @@ class SecurityController extends Controller
             ], 403);
         }
 
+        if (! $user->status) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ce compte administrateur est suspendu.',
+            ], 403);
+        }
+
         // 5. Génération du Token avec capacités définies (Laravel Sanctum)
         $tokenCapabilities = $user->role === 'superadmin' ? ['*'] : ['gateways:read', 'transactions:manage'];
         $token = $user->createToken('digit_gateway_admin_token', $tokenCapabilities)->plainTextToken;

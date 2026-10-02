@@ -30,6 +30,7 @@ class UserFactory extends Factory
             'password' => static::$password ??= Hash::make('password'),
             'transaction_pin' => Hash::make('1234'),
             'role' => 'customer',
+            'status' => true,
             'remember_token' => Str::random(10),
         ];
     }
@@ -41,6 +42,16 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'role' => 'admin',
+        ]);
+    }
+
+    /**
+     * Indicate that the user is a super administrator (seul rôle autorisé à ajuster un wallet).
+     */
+    public function superadmin(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'superadmin',
         ]);
     }
 

@@ -31,10 +31,16 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         // Limite stricte sur les endpoints d'authentification pour freiner le brute-force
-        // (par IP + numéro de téléphone visé, pour éviter qu'un attaquant sur une seule IP
-        // ne puisse tester des mots de passe sur des dizaines de comptes en restant sous la limite par IP).
+        // (par IP + identifiant visé, et par IP seule).
+        // La seconde limite (par IP seule) empêche une même IP de tester un mot de passe
+        // sur des centaines de comptes en restant sous la limite par compte.
         RateLimiter::for('auth', function (Request $request) {
-            return Limit::perMinute(5)->by($request->ip().'|'.$request->input('phone'));
+            $identifier = (string) ($request->input('phone') ?? $request->input('email'));
+
+            return [
+                Limit::perMinute(5)->by('account:'.$request->ip().'|'.$identifier),
+                Limit::perMinute(20)->by('ip:'.$request->ip()),
+            ];
         });
 
         // La doc marchande est publique (restreinte aux routes /v1/gateway/*, cf.

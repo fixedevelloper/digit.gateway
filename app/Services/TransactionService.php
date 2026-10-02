@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\TransactionValidationException;
 use App\Jobs\ProcessTransferJob;
 use App\Jobs\ProcessWithdrawalJob;
+use App\Jobs\SimulateSandboxTransactionJob;
 use App\Models\Agency;
 use App\Models\Operator;
 use App\Models\Quote;
@@ -311,34 +312,36 @@ class TransactionService
      *
      * @throws ValidationException si l'opérateur est invalide/hors bornes ou le solde insuffisant
      */
-    public function createTransfer(User $user, array $data, string $channel = 'mobile_app'): array
+    public function createTransfer(User $user, array $data, string $channel = 'mobile_app', string $environment = 'production'): array
     {
         $requestId = 'TX-'.strtoupper(Str::random(12));
+        $balanceColumn = Wallet::balanceColumn($environment);
 
-        $result = DB::transaction(function () use ($user, $requestId, $data, $channel) {
+        $result = DB::transaction(function () use ($user, $requestId, $data, $channel, $environment, $balanceColumn) {
             $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->firstOrFail();
             $prepared = $this->prepare($user, $wallet->currency, $data, 'transfer');
             $pricing = $prepared['pricing'];
 
-            if ($wallet->balance < $pricing['total']) {
+            if ($wallet->{$balanceColumn} < $pricing['total']) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Insufficient fund/Balance.');
             }
 
-            $wallet->decrement('balance', $pricing['total']);
+            $wallet->decrement($balanceColumn, $pricing['total']);
 
             $transaction = Transaction::create(array_merge($this->transactionAttributes($prepared, $data, 'transfer'), [
                 'reference' => $requestId,
                 'user_id' => $user->id,
                 'channel' => $channel,
+                'environment' => $environment,
                 'status' => 'processing',
             ]));
 
-            return ['transaction' => $transaction, 'balance' => $wallet->balance, 'fee' => $pricing['fee'], 'total' => $pricing['total']];
+            return ['transaction' => $transaction, 'balance' => $wallet->{$balanceColumn}, 'fee' => $pricing['fee'], 'total' => $pricing['total']];
         });
 
         // Dispatché après commit (hors de la transaction DB) pour ne jamais traiter
         // une transaction dont l'écriture n'a pas encore été validée.
-        ProcessTransferJob::dispatch($result['transaction']);
+        $this->dispatchProcessing($result['transaction'], ProcessTransferJob::class);
 
         return $result;
     }
@@ -352,33 +355,35 @@ class TransactionService
      *
      * @throws ValidationException si l'opérateur est invalide/hors bornes ou le solde insuffisant
      */
-    public function createWithdrawal(User $user, Agency $agency, array $data, string $channel = 'mobile_app'): array
+    public function createWithdrawal(User $user, Agency $agency, array $data, string $channel = 'mobile_app', string $environment = 'production'): array
     {
         $requestId = 'WD-'.strtoupper(Str::random(12));
+        $balanceColumn = Wallet::balanceColumn($environment);
 
-        $result = DB::transaction(function () use ($user, $agency, $requestId, $data, $channel) {
+        $result = DB::transaction(function () use ($user, $agency, $requestId, $data, $channel, $environment, $balanceColumn) {
             $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->firstOrFail();
             $prepared = $this->prepare($user, $wallet->currency, $data, 'withdrawal');
             $pricing = $prepared['pricing'];
 
-            if ($wallet->balance < $pricing['total']) {
+            if ($wallet->{$balanceColumn} < $pricing['total']) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Solde insuffisant pour effectuer ce retrait.');
             }
 
-            $wallet->decrement('balance', $pricing['total']);
+            $wallet->decrement($balanceColumn, $pricing['total']);
 
             $transaction = Transaction::create(array_merge($this->transactionAttributes($prepared, $data, 'withdrawal'), [
                 'reference' => $requestId,
                 'user_id' => $user->id,
                 'channel' => $channel,
+                'environment' => $environment,
                 'agency_id' => $agency->id,
                 'status' => 'pending',
             ]));
 
-            return ['transaction' => $transaction, 'balance' => $wallet->balance, 'fee' => $pricing['fee'], 'total' => $pricing['total']];
+            return ['transaction' => $transaction, 'balance' => $wallet->{$balanceColumn}, 'fee' => $pricing['fee'], 'total' => $pricing['total']];
         });
 
-        ProcessTransferJob::dispatch($result['transaction']);
+        $this->dispatchProcessing($result['transaction'], ProcessTransferJob::class);
 
         return $result;
     }
@@ -394,27 +399,45 @@ class TransactionService
      *
      * @throws ValidationException si l'opérateur est invalide ou hors bornes
      */
-    public function createDeposit(User $user, array $data, string $channel = 'mobile_app'): array
+    public function createDeposit(User $user, array $data, string $channel = 'mobile_app', string $environment = 'production'): array
     {
         $wallet = $user->wallet;
-        $requestId = 'WD-'.strtoupper(Str::random(12));
+        $requestId = 'DP-'.strtoupper(Str::random(12));
 
         // Une erreur (opérateur, cotation) annule tout : rien n'est écrit.
-        [$transaction, $pricing] = DB::transaction(function () use ($user, $wallet, $requestId, $data, $channel) {
+        [$transaction, $pricing] = DB::transaction(function () use ($user, $wallet, $requestId, $data, $channel, $environment) {
             $prepared = $this->prepare($user, $wallet->currency, $data, 'deposit');
 
             $transaction = Transaction::create(array_merge($this->transactionAttributes($prepared, $data, 'deposit'), [
                 'reference' => $requestId,
                 'user_id' => $user->id,
                 'channel' => $channel,
+                'environment' => $environment,
                 'status' => 'pending',
             ]));
 
             return [$transaction, $prepared['pricing']];
         });
 
-        ProcessWithdrawalJob::dispatch($transaction);
+        $this->dispatchProcessing($transaction, ProcessWithdrawalJob::class);
 
-        return ['transaction' => $transaction, 'balance' => (float) $wallet->balance, 'fee' => $pricing['fee'], 'total' => $pricing['total']];
+        return ['transaction' => $transaction, 'balance' => (float) $wallet->{Wallet::balanceColumn($environment)}, 'fee' => $pricing['fee'], 'total' => $pricing['total']];
+    }
+
+    /**
+     * Traitement asynchrone : le job Digitwave réel en production, la simulation en
+     * sandbox (aucun appel au fournisseur de paiement).
+     *
+     * @param  class-string  $productionJob
+     */
+    private function dispatchProcessing(Transaction $transaction, string $productionJob): void
+    {
+        if ($transaction->environment === 'sandbox') {
+            SimulateSandboxTransactionJob::dispatch($transaction);
+
+            return;
+        }
+
+        $productionJob::dispatch($transaction);
     }
 }

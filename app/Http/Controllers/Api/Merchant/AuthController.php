@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Merchant;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Wallet;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -60,6 +61,9 @@ class AuthController extends Controller
             // vérifie de PIN (c'est la clé API elle-même qui fait office de secret).
             'transaction_pin' => Hash::make((string) Str::random(8)),
         ]);
+
+        // Argent fictif pour tester l'intégration avec une clé sk_test_ dès l'inscription.
+        $merchant->wallet()->update(['sandbox_balance' => Wallet::SANDBOX_STARTING_BALANCE]);
 
         $token = $merchant->createToken('merchant_dashboard_token')->plainTextToken;
 

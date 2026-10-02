@@ -11,6 +11,12 @@ class UserSeeder extends Seeder
 {
     public function run(): void
     {
+        if (app()->environment('production')) {
+            $this->command?->warn('UserSeeder ignoré en production (identifiants de démonstration).');
+
+            return;
+        }
+
         /*
         |--------------------------------------------------------------------------
         | 1. COMPTE CLIENT / TEST PRINCIPAL (Lorenzo)

@@ -3,10 +3,11 @@
 namespace App\Jobs;
 
 use App\Contracts\PaymentGatewayContract;
+use App\Jobs\Concerns\SubmitsToGatewayOnce;
 use App\Models\Transaction;
 use App\Services\CarrierRouter;
+use App\Services\TransactionStatusUpdater;
 use App\Support\Phone;
-use Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -15,7 +16,7 @@ use Illuminate\Queue\SerializesModels;
 
 class ProcessTransferJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, SubmitsToGatewayOnce;
 
     /**
      * Le nombre de fois que le job peut être tenté.
@@ -49,9 +50,16 @@ class ProcessTransferJob implements ShouldQueue
         // Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
         $country = trim($this->transaction->country_name ?? '');
 
-        // Éviter de traiter une transaction qui n'est pas en attente/processing
-        if (! in_array($this->transaction->status, ['pending', 'processing'])) {
-            logger()->warning('[JOB TERMINATED] Annulation : Statut non éligible pour le traitement', [
+        // 1. Détermination de l'opérateur : respecte l'éventuelle bascule manuelle
+        // configurée par l'admin pour ce pays (dashboard > Corridors), sinon
+        // utilise l'opérateur choisi par l'expéditeur. Fait avant la réservation :
+        // une erreur ici laisse la transaction non soumise, donc relançable.
+        $carrier = $carrierRouter->resolve($this->transaction);
+
+        // 2. Une seule soumission par transaction : une relance du job après envoi
+        // ne doit jamais verser une seconde fois.
+        if (! $this->claimSubmission(['pending', 'processing'])) {
+            logger()->warning('[JOB TERMINATED] Transaction déjà soumise ou statut non éligible', [
                 'ref' => $this->transaction->reference,
                 'status' => $this->transaction->status,
             ]);
@@ -59,90 +67,40 @@ class ProcessTransferJob implements ShouldQueue
             return;
         }
 
-        try {
-            // 1. Détermination de l'opérateur : respecte l'éventuelle bascule manuelle
-            // configurée par l'admin pour ce pays (dashboard > Corridors), sinon
-            // utilise l'opérateur choisi par l'expéditeur.
-            $carrier = $carrierRouter->resolve($this->transaction);
-
-            // Suivi précis de la payload sortante vers Digitwave
-            logger()->info('Envoi transfert Digitwave', [
-                'ref' => $this->transaction->reference,
-                'country_sent' => $country,
-                'carrier_sent' => $carrier,
-                'phone' => Phone::mask($this->transaction->recipient_phone),
-                'amount' => (float) $this->transaction->amount_to_receive,
-                'currency' => $this->transaction->currency_received,
-            ]);
-
-            // Utilisation du fournisseur de paiement lié (avec $country nettoyé et $carrier déterminé)
-            $result = $gateway->sendMoney(
-                $this->transaction->reference,
-                $country,
-                $carrier,
-                $this->transaction->recipient_phone,
-                (float) $this->transaction->amount_to_receive,
-                $this->transaction->currency_received
-            );
-
-            logger()->info('Réponse Digitwave Envoi', ['ref' => $this->transaction->reference, 'response' => $result->raw]);
-
-            if ($result->success) {
-                // Si l'API renvoie un statut immédiat comme 'Success' ou 'Successful'
-                $apiStatus = $result->status ?? 'PROCESSING';
-
-                if ($apiStatus === 'SUCCESS' || $apiStatus === 'SUCCESSFUL') {
-                    $this->transaction->update([
-                        'status' => 'success',
-                        'gateway_reference' => $result->requestId,
-                    ]);
-                } else {
-                    // Statut intermédiaire, en attente de la confirmation finale
-                    $this->transaction->update([
-                        'status' => 'processing',
-                        'gateway_reference' => $result->requestId,
-                    ]);
-                }
-            } else {
-                // L'API a répondu avec un code d'erreur ou success: false
-                $this->failTransaction($result->message ?? 'Erreur retournée par l\'API Digitwave.');
-            }
-
-        } catch (Exception $e) {
-            // Journaliser l'erreur interne de communication
-            logger()->error("Erreur lors du traitement du transfert {$this->transaction->reference} : ".$e->getMessage(), [
-                'statut_actuel' => $this->transaction->status ?? 'NON_DEFINI',
-            ]);
-
-            // Lever l'exception permet à Laravel de replacer le job dans la file (Queue) pour une nouvelle tentative
-            throw $e;
-        }
-    }
-
-    /**
-     * Gérer l'échec définitif du transfert (Remboursement).
-     */
-    protected function failTransaction(string $reason): void
-    {
-        $this->transaction->update([
-            'status' => 'failed',
-            'failure_reason' => $reason,
+        // Suivi précis de la payload sortante vers Digitwave
+        logger()->info('Envoi transfert Digitwave', [
+            'ref' => $this->transaction->reference,
+            'country_sent' => $country,
+            'carrier_sent' => $carrier,
+            'phone' => Phone::mask($this->transaction->recipient_phone),
+            'amount' => (float) $this->transaction->amount_to_receive,
+            'currency' => $this->transaction->currency_received,
         ]);
 
-        // RECONCILIATION : Recréditer le portefeuille de l'utilisateur
-        $wallet = $this->transaction->user->wallet;
-        $totalRefund = $this->transaction->amount_sent + $this->transaction->fees;
+        $result = $gateway->sendMoney(
+            $this->transaction->reference,
+            $country,
+            $carrier,
+            $this->transaction->recipient_phone,
+            (float) $this->transaction->amount_to_receive,
+            $this->transaction->currency_received
+        );
 
-        $wallet->increment('balance', $totalRefund);
+        logger()->info('Réponse Digitwave Envoi', ['ref' => $this->transaction->reference, 'response' => $result->raw]);
 
-        logger()->warning("Transfert échoué {$this->transaction->reference}. Utilisateur remboursé de : {$totalRefund} {$this->transaction->currency_sent}");
-    }
+        if (! $result->success) {
+            $this->handleGatewayFailure($result, 'Erreur retournée par l\'API Digitwave.');
 
-    /**
-     * Action à mener si le Job échoue définitivement après toutes les tentatives (3 essais).
-     */
-    public function failed(Exception $exception): void
-    {
-        $this->failTransaction($exception->getMessage());
+            return;
+        }
+
+        $this->transaction->update([
+            'status' => 'processing',
+            'gateway_reference' => $result->requestId,
+        ]);
+
+        // Statut immédiat (ex: SUCCESS) appliqué par le même chemin que le webhook et le
+        // cron ; un statut intermédiaire laisse la transaction en 'processing'.
+        app(TransactionStatusUpdater::class)->apply($this->transaction, $result->status ?? 'PROCESSING');
     }
 }

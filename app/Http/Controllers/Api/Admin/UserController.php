@@ -41,6 +41,11 @@ class UserController extends Controller
         ]);
 
         $user->update($validated);
+
+        // Suspension : coupe immédiatement les sessions ouvertes (tokens Sanctum).
+        if (array_key_exists('status', $validated) && ! $validated['status']) {
+            $user->tokens()->delete();
+        }
         $user->load('wallet:id,user_id,balance,currency');
 
         return response()->json([
@@ -70,6 +75,9 @@ class UserController extends Controller
         // Le cast 'hashed' du modèle User se charge du hachage à la sauvegarde.
         $user->password = $password;
         $user->save();
+
+        // L'ancien mot de passe est peut-être compromis : ses sessions ne doivent pas survivre.
+        $user->tokens()->delete();
 
         return response()->json([
             'status' => 'success',

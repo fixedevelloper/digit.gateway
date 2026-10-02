@@ -89,6 +89,13 @@ class AuthController extends Controller
             ], 401);
         }
 
+        if (! $user->status) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ce compte est suspendu. Contactez le support.',
+            ], 403);
+        }
+
         // 4. Remplacement ou génération du nouveau token Sanctum
         // (Optionnel : vous pouvez nettoyer les anciens tokens si nécessaire)
         $user->tokens()->delete();

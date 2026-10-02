@@ -14,7 +14,7 @@ class WalletAdjustmentTest extends TestCase
 
     public function test_a_credit_adjustment_updates_balance_and_leaves_an_audit_trail(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = User::factory()->superadmin()->create();
         Sanctum::actingAs($admin, ['*']);
 
         $target = User::factory()->create();
@@ -41,7 +41,7 @@ class WalletAdjustmentTest extends TestCase
 
     public function test_a_debit_adjustment_with_insufficient_balance_is_rejected_and_not_logged(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = User::factory()->superadmin()->create();
         Sanctum::actingAs($admin, ['*']);
 
         $target = User::factory()->create();
@@ -60,7 +60,7 @@ class WalletAdjustmentTest extends TestCase
 
     public function test_the_adjustment_history_endpoint_lists_past_adjustments(): void
     {
-        $admin = User::factory()->admin()->create();
+        $admin = User::factory()->superadmin()->create();
         Sanctum::actingAs($admin, ['*']);
 
         $target = User::factory()->create();

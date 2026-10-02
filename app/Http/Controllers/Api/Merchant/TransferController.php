@@ -28,7 +28,7 @@ use Illuminate\Validation\Rule;
  * La logique de débit/verrouillage du wallet reste partagée avec l'app mobile
  * via TransactionService — seule la façade HTTP diffère.
  */
-#[Group('Merchant Gateway', 'Endpoints B2B authentifiés par clé API (Authorization: Bearer sk_test_.../sk_live_...), pour une intégration serveur-à-serveur. Voir /api/merchants/register pour obtenir une clé.', weight: 1)]
+#[Group('Merchant Gateway', "Endpoints B2B authentifiés par clé API (Authorization: Bearer sk_test_.../sk_live_...), pour une intégration serveur-à-serveur. Voir /api/merchants/register pour obtenir une clé.\n\n**Sandbox** : une clé `sk_test_` crée des transactions simulées (aucun mouvement réel), sur un solde de test distinct. Le résultat dépend de la fin du numéro du destinataire : `...0002` → échec (remboursé), `...0003` → reste en cours, tout autre numéro → succès.", weight: 1)]
 class TransferController extends Controller
 {
     public function __construct(private readonly TransactionService $transactions)
@@ -58,7 +58,8 @@ class TransferController extends Controller
             $result = $this->transactions->createTransfer(
                 $request->user(),
                 $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']),
-                'merchant_api'
+                'merchant_api',
+                $this->environment($request)
             );
         } catch (TransactionValidationException $e) {
             return $this->validationErrorResponse($e);
@@ -108,7 +109,8 @@ class TransferController extends Controller
                 $request->user(),
                 $agency,
                 $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']),
-                'merchant_api'
+                'merchant_api',
+                $this->environment($request)
             );
         } catch (TransactionValidationException $e) {
             return $this->validationErrorResponse($e);
@@ -144,7 +146,8 @@ class TransferController extends Controller
             $result = $this->transactions->createDeposit(
                 $request->user(),
                 $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']),
-                'merchant_api'
+                'merchant_api',
+                $this->environment($request)
             );
         } catch (TransactionValidationException $e) {
             return $this->validationErrorResponse($e);
@@ -174,7 +177,8 @@ class TransferController extends Controller
         ]);
 
         $query = Transaction::where('user_id', $request->user()->id)
-            ->where('channel', 'merchant_api');
+            ->where('channel', 'merchant_api')
+            ->where('environment', $this->environment($request));
 
         if (! empty($validated['type'])) {
             $query->where('type', $validated['type']);
@@ -196,7 +200,7 @@ class TransferController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'data' => $transactions->getCollection()->map(fn (Transaction $t) => $this->formatTransaction($t)),
+            'data' => $transactions->getCollection()->map(fn (Transaction $t) => $t->toMerchantArray()),
             'meta' => [
                 'current_page' => $transactions->currentPage(),
                 'last_page' => $transactions->lastPage(),
@@ -217,6 +221,7 @@ class TransferController extends Controller
     {
         $transaction = Transaction::where('user_id', $request->user()->id)
             ->where('channel', 'merchant_api')
+            ->where('environment', $this->environment($request))
             ->where('reference', $reference)
             ->first();
 
@@ -230,7 +235,7 @@ class TransferController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'data' => $this->formatTransaction($transaction),
+            'data' => $transaction->toMerchantArray(),
         ], 200);
     }
 
@@ -241,7 +246,7 @@ class TransferController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Request accepted, processing in progress',
-            'data' => $this->formatTransaction($transaction, [
+            'data' => $transaction->toMerchantArray([
                 'fee' => (float) $result['fee'],
                 'total_debited' => (float) $result['total'],
                 'remaining_balance' => (float) $result['balance'],
@@ -249,27 +254,13 @@ class TransferController extends Controller
         ], 200);
     }
 
-    private function formatTransaction(Transaction $transaction, array $extra = []): array
+    /**
+     * Environnement de la clé API utilisée (posé par ApiKeyAuth). Par prudence, tout
+     * ce qui n'est pas explicitement 'production' est traité comme sandbox.
+     */
+    private function environment(Request $request): string
     {
-        return array_merge([
-            'reference' => $transaction->reference,
-            'type' => $transaction->type,
-            'status' => $transaction->status,
-            'amount' => (float) $transaction->amount_sent,
-            'fee' => (float) $transaction->fees,
-            'currency' => $transaction->currency_sent,
-            'amount_received' => (float) $transaction->amount_to_receive,
-            'currency_received' => $transaction->currency_received,
-            'exchange_rate' => (float) $transaction->exchange_rate,
-            'recipient' => [
-                'phone' => $transaction->recipient_phone,
-                'operator' => $transaction->recipient_operator,
-                'country' => $transaction->country_name,
-            ],
-            'failure_reason' => $transaction->failure_reason,
-            'created_at' => $transaction->created_at?->toIso8601String(),
-            'updated_at' => $transaction->updated_at?->toIso8601String(),
-        ], $extra);
+        return $request->attributes->get('environment') === 'production' ? 'production' : 'sandbox';
     }
 
     private function validationErrorResponse(TransactionValidationException $e): JsonResponse

@@ -76,6 +76,9 @@ class TransactionController extends Controller
             },
         ]);
 
+        // Les transactions sandbox (fictives) des marchands sont exclues par défaut.
+        $query->where('environment', $request->input('environment') === 'sandbox' ? 'sandbox' : 'production');
+
         if ($request->has('status')) {
             $query->where('status', $request->status);
         }

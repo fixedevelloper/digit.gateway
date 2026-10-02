@@ -276,10 +276,12 @@ class TransferController extends Controller
     public function getTransactionStatus(string $id)
     {
         try {
-            // 1. Recherche de la transaction en base de données
-            // On cherche par l'identifiant unique (reference, request_id ou id technique)
-            $transaction = Transaction::where('reference', $id)
-                ->orWhere('id', $id)
+            // 1. Recherche de la transaction en base de données, parmi celles de
+            // l'utilisateur connecté uniquement (référence ou id technique)
+            $transaction = Transaction::where('user_id', Auth::id())
+                ->where(function ($query) use ($id) {
+                    $query->where('reference', $id)->orWhere('id', $id);
+                })
                 ->first();
 
             if (! $transaction) {
@@ -304,9 +306,11 @@ class TransferController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
+            Log::error('Erreur vérification statut : '.$e->getMessage());
+
             return response()->json([
                 'status' => 'failed',
-                'message' => 'Erreur lors de la vérification du statut : '.$e->getMessage(),
+                'message' => 'Erreur lors de la vérification du statut.',
             ], 500);
         }
     }

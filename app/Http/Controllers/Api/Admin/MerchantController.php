@@ -45,6 +45,11 @@ class MerchantController extends Controller
         ]);
 
         $merchant->update($validated);
+
+        // Suspension : coupe immédiatement les sessions ouvertes (tokens Sanctum).
+        if (array_key_exists('status', $validated) && ! $validated['status']) {
+            $merchant->tokens()->delete();
+        }
         $merchant->load('wallet:id,user_id,balance,currency');
 
         return response()->json([

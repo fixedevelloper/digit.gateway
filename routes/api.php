@@ -12,7 +12,9 @@ use App\Http\Controllers\Api\CountryController;
 use App\Http\Controllers\Api\Merchant\ApiKeyController;
 use App\Http\Controllers\Api\Merchant\AuthController as MerchantAuthController;
 use App\Http\Controllers\Api\Merchant\CountryController as MerchantCountryController;
+use App\Http\Controllers\Api\Merchant\PortalController as MerchantPortalController;
 use App\Http\Controllers\Api\Merchant\TransferController as MerchantTransferController;
+use App\Http\Controllers\Api\Merchant\WalletController as MerchantWalletController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\SecurityController;
 use App\Http\Controllers\Api\TransferController;
@@ -41,7 +43,7 @@ $registerApiRoutes = function () {
         Route::post('/register', [AuthController::class, 'register']);
         Route::post('/login', [AuthController::class, 'login']);
     });
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/profile', [AuthController::class, 'profile']);
 
@@ -54,7 +56,7 @@ $registerApiRoutes = function () {
     // ==========================================
     // 2. ROUTES TRANSACTIONNELLES (Flutter App)
     // ==========================================
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
         // Pays et opérateurs
         Route::get('/countries', [CountryController::class, 'index']);
@@ -90,7 +92,7 @@ $registerApiRoutes = function () {
     // sous /admin/auth/* par cohérence avec le reste des routes d'administration.
     Route::middleware('throttle:auth')->post('/admin/auth/login', [SecurityController::class, 'login']);
 
-    Route::middleware(['auth:sanctum', 'admin.role'])->prefix('admin')->group(function () {
+    Route::middleware(['auth:sanctum', 'active', 'admin.role'])->prefix('admin')->group(function () {
 
         // Déconnexion de la session admin
         Route::post('/auth/logout', [SecurityController::class, 'logout']);
@@ -111,7 +113,8 @@ $registerApiRoutes = function () {
 
         // Gestion & Audit de la Masse Monétaire (Wallets)
         Route::get('/wallets', [WalletController::class, 'index']);
-        Route::post('/wallets/{id}/adjust', [WalletController::class, 'adjust']); // Mutation d'ajustement manuel
+        // Mutation d'ajustement manuel : crée ou détruit de la monnaie, réservé au superadmin
+        Route::post('/wallets/{id}/adjust', [WalletController::class, 'adjust'])->middleware('admin.role:superadmin');
         Route::get('/wallets/{id}/adjustments', [WalletController::class, 'adjustments']); // Historique des ajustements
 
         // Journal d'Audit Global (Transactions de la passerelle)
@@ -153,13 +156,18 @@ Route::prefix('merchants')->group(function () {
         Route::post('/login', [MerchantAuthController::class, 'login']);
     });
 
-    Route::middleware(['auth:sanctum', 'merchant.role'])->group(function () {
+    Route::middleware(['auth:sanctum', 'active', 'merchant.role'])->group(function () {
         Route::post('/logout', [MerchantAuthController::class, 'logout']);
         Route::get('/profile', [MerchantAuthController::class, 'profile']);
 
         Route::get('/api-keys', [ApiKeyController::class, 'index']);
         Route::post('/api-keys', [ApiKeyController::class, 'store']);
         Route::delete('/api-keys/{id}', [ApiKeyController::class, 'destroy']);
+
+        // Wallet et transactions du portail (live et sandbox)
+        Route::get('/wallet', [MerchantPortalController::class, 'wallet']);
+        Route::get('/transactions', [MerchantPortalController::class, 'transactions']);
+        Route::post('/sandbox/top-up', [MerchantPortalController::class, 'topUpSandbox']);
     });
 });
 
@@ -191,6 +199,9 @@ Route::prefix('v1/gateway')->group(function () {
         ->middleware(['auth.apikey:withdrawal.write', 'idempotency.key']);
     Route::post('/deposits', [MerchantTransferController::class, 'initiateDeposit'])
         ->middleware(['auth.apikey:deposit.write', 'idempotency.key']);
+
+    Route::get('/wallet', [MerchantWalletController::class, 'show'])
+        ->middleware('auth.apikey:wallet.read');
 
     Route::get('/transactions', [MerchantTransferController::class, 'index'])
         ->middleware('auth.apikey:transactions.read');

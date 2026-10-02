@@ -8,12 +8,17 @@ use Symfony\Component\HttpFoundation\Response;
 
 class CheckAdminRole
 {
-    public function handle(Request $request, Closure $next): Response
+    /**
+     * Sans paramètre : admin ou superadmin. Avec paramètre (ex: 'admin.role:superadmin') :
+     * uniquement les rôles listés.
+     */
+    public function handle(Request $request, Closure $next, string ...$roles): Response
     {
         $user = $request->user();
+        $roles = $roles ?: ['admin', 'superadmin'];
 
         // Vérification stricte selon les rôles définis dans ta migration
-        if (! $user || ! in_array($user->role, ['admin', 'superadmin'])) {
+        if (! $user || ! in_array($user->role, $roles, true)) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Accès interdit. Privilèges administratifs requis.',

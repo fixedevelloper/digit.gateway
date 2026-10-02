@@ -3,6 +3,7 @@
 use App\Http\Middleware\ApiKeyAuth;
 use App\Http\Middleware\CheckAdminRole;
 use App\Http\Middleware\CheckMerchantRole;
+use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\Merchant\IdempotencyKey;
 use App\Http\Middleware\PreventDuplicateRequest;
 use App\Http\Middleware\VerifyDigitwaveSignature;
@@ -27,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
 
         $middleware->alias([
+            'active' => EnsureUserIsActive::class,
             'admin.role' => CheckAdminRole::class,
             'merchant.role' => CheckMerchantRole::class,
             'auth.apikey' => ApiKeyAuth::class,
@@ -38,7 +40,7 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withBroadcasting(
         __DIR__.'/../routes/channels.php',
-        ['attributes' => ['middleware' => ['api', 'auth:sanctum']]] // Adapte selon ton package d'authentification (sanctum, api, etc.)
+        ['attributes' => ['middleware' => ['api', 'auth:sanctum', 'active']]] // Adapte selon ton package d'authentification (sanctum, api, etc.)
     )
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

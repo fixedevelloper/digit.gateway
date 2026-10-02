@@ -20,17 +20,17 @@ class DashboardController extends Controller
         $startOfMonth = $now->copy()->startOfMonth();
 
         // 1. Calcul du volume total transféré ce mois-ci (uniquement les transactions réussies)
-        $monthlyVolume = Transaction::where('status', 'success')
+        $monthlyVolume = Transaction::where('environment', 'production')->where('status', 'success')
             ->where('created_at', '>=', $startOfMonth)
             ->sum('amount_sent');
 
         // 2. Nombre total de transactions réussies ce mois-ci
-        $successfulTransactionsCount = Transaction::where('status', 'success')
+        $successfulTransactionsCount = Transaction::where('environment', 'production')->where('status', 'success')
             ->where('created_at', '>=', $startOfMonth)
             ->count();
 
         // 3. Taux de succès global (Réussies / Total initiées)
-        $totalTransactions = Transaction::where('created_at', '>=', $startOfMonth)->count();
+        $totalTransactions = Transaction::where('environment', 'production')->where('created_at', '>=', $startOfMonth)->count();
         $successRate = $totalTransactions > 0
             ? round(($successfulTransactionsCount / $totalTransactions) * 100, 1)
             : 100.0;
@@ -48,6 +48,7 @@ class DashboardController extends Controller
             DB::raw("SUM(CASE WHEN type = 'deposit' THEN amount_sent ELSE 0 END) as total_credit"),
             DB::raw("SUM(CASE WHEN type IN ('withdrawal', 'transfer', 'payment') THEN amount_sent ELSE 0 END) as total_debit")
         )
+            ->where('environment', 'production')
             ->where('status', 'success')
             ->where('created_at', '>=', $sevenDaysAgo)
             ->groupBy(DB::raw('DATE(created_at)'))

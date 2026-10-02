@@ -3,6 +3,7 @@
 namespace App\Http\Middleware\Merchant;
 
 use Closure;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\Response;
@@ -40,7 +41,8 @@ class IdempotencyKey
         }
 
         $merchantId = $request->user()->id;
-        $cacheKey = "idempotency:{$merchantId}:{$idempotencyKey}";
+        $environment = $request->attributes->get('environment', 'production');
+        $cacheKey = "idempotency:{$merchantId}:{$environment}:{$idempotencyKey}";
         $requestHash = hash('sha256', $request->getContent());
 
         // Verrou court pour empêcher deux requêtes concurrentes portant la même clé
@@ -79,6 +81,13 @@ class IdempotencyKey
             }
 
             return $response;
+        } catch (LockTimeoutException) {
+            // Une requête portant la même clé est encore en cours de traitement.
+            return response()->json([
+                'status' => 'error',
+                'error_code' => 'IDEMPOTENCY_KEY_IN_PROGRESS',
+                'message' => "Une requête avec cette clé d'idempotence est déjà en cours de traitement. Réessayez dans quelques secondes.",
+            ], 409);
         } finally {
             optional($lock)->release();
         }

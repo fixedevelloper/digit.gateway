@@ -16,7 +16,8 @@ class CheckTransactionStatus extends Command
 
     public function handle(PaymentGatewayContract $gateway, TransactionStatusUpdater $updater): int
     {
-        $query = Transaction::whereIn('status', ['pending', 'processing'])
+        $query = Transaction::where('environment', 'production')
+            ->whereIn('status', ['pending', 'processing'])
             ->whereNotNull('gateway_reference')
             ->where('gateway_reference', '!=', '');
 

@@ -3,8 +3,8 @@
 namespace App\Events;
 
 use App\Models\Transaction;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
@@ -23,15 +23,11 @@ class TransactionStatusUpdated implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
-        $channelName = 'user.'.$this->transaction->user_id;
-
-        Log::info('[TransactionStatusUpdated] 📡 Canal public déterminé', [
-            'channel' => $channelName,
-        ]);
-
-        // Channel (public) au lieu de PrivateChannel : pas d'authentification requise
+        // Canal privé (diffusé sous le nom "private-user.{id}") : seul le propriétaire
+        // du compte peut s'y abonner, après autorisation par /broadcasting/auth
+        // (cf. routes/channels.php).
         return [
-            new Channel($channelName),
+            new PrivateChannel('user.'.$this->transaction->user_id),
         ];
     }
 

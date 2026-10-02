@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\VerifyTransactionPin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 
 class UserController extends Controller
@@ -33,6 +35,30 @@ class UserController extends Controller
                 'status' => 'error',
                 'errors' => $validator->errors(), // Capturé par _parseDioError dans Flutter
             ], 422);
+        }
+
+        // Le téléphone est l'identifiant de connexion : le changer avec un simple token
+        // (volé) reviendrait à prendre le compte. Le mot de passe actuel est exigé.
+        if ($request->phone !== $user->phone) {
+            $passwordKey = 'profile-password-attempts:'.$user->id;
+
+            if (RateLimiter::tooManyAttempts($passwordKey, 5)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Trop de tentatives. Réessayez plus tard.',
+                ], 429);
+            }
+
+            if (! Hash::check((string) $request->input('current_password'), $user->password)) {
+                RateLimiter::hit($passwordKey, 3600);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Le mot de passe actuel est requis pour changer de numéro de téléphone.',
+                ], 400);
+            }
+
+            RateLimiter::clear($passwordKey);
         }
 
         // Sauvegarde
@@ -67,7 +93,6 @@ class UserController extends Controller
             'pin.confirmed' => 'Les deux codes PIN ne correspondent pas.',
         ]);
 
-        logger('pesss');
         if ($validator->fails()) {
             return response()->json([
                 'status' => 'error',
@@ -77,7 +102,15 @@ class UserController extends Controller
 
         // Vérification de la correspondance de l'ancien code PIN
         // Supposons que ton champ en base de données s'appelle 'transaction_pin' et soit haché
+        $pinKey = VerifyTransactionPin::limiterKey($user->id);
+
+        if (RateLimiter::tooManyAttempts($pinKey, VerifyTransactionPin::MAX_ATTEMPTS)) {
+            return VerifyTransactionPin::lockedResponse($user->id);
+        }
+
         if (! Hash::check($request->old_pin, $user->transaction_pin)) {
+            RateLimiter::hit($pinKey, VerifyTransactionPin::LOCK_SECONDS);
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'L\'ancien code PIN saisi est incorrect.', // Capturé par data['message'] dans Flutter
@@ -85,6 +118,8 @@ class UserController extends Controller
         }
 
         // Mise à jour du code PIN (haché pour la sécurité)
+        RateLimiter::clear($pinKey);
+
         $user->update([
             'transaction_pin' => Hash::make($request->pin),
         ]);

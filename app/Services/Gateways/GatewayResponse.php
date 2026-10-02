@@ -10,6 +10,7 @@ final class GatewayResponse
         public readonly ?string $status = null,
         public readonly ?string $message = null,
         public readonly array $raw = [],
+        public readonly bool $uncertain = false,
     ) {}
 
     /**
@@ -31,8 +32,20 @@ final class GatewayResponse
         );
     }
 
+    /**
+     * Refus explicite de Digitwave : l'opération n'a pas eu lieu, le remboursement est sûr.
+     */
     public static function failure(string $message): self
     {
         return new self(success: false, message: $message);
+    }
+
+    /**
+     * Résultat inconnu (timeout, coupure réseau, erreur 5xx) : Digitwave a pu exécuter
+     * l'opération. Ne jamais rembourser ni renvoyer sur la base de ce résultat.
+     */
+    public static function uncertain(string $message): self
+    {
+        return new self(success: false, message: $message, uncertain: true);
     }
 }

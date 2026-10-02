@@ -4,7 +4,10 @@ namespace App\Services;
 
 use App\Events\TransactionStatusUpdated;
 use App\Models\Transaction;
+use App\Models\Wallet;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Applique un statut Digitwave (issu du polling `transaction:status` ou du
@@ -23,22 +26,25 @@ class TransactionStatusUpdater
     {
         $apiStatus = strtolower(trim($apiStatus));
 
-        DB::transaction(function () use ($transaction, $apiStatus, $message) {
+        $updated = DB::transaction(function () use ($transaction, $apiStatus, $message) {
             // Recharger pour verrouiller la ligne et vérifier l'état actuel : une
             // transaction déjà finalisée (par l'autre chemin, ou un rejeu du
             // webhook) ne doit jamais être retraitée.
             $transaction = Transaction::where('id', $transaction->id)->lockForUpdate()->first();
 
             if (! in_array($transaction->status, ['pending', 'processing'])) {
-                return;
+                return null;
             }
+
+            // Une transaction sandbox ne crédite/rembourse que le solde fictif.
+            $balanceColumn = Wallet::balanceColumn($transaction->environment);
 
             if (in_array($apiStatus, ['success', 'successful', 'completed'])) {
                 $transaction->update(['status' => 'success']);
 
                 // Créditer uniquement si c'est un dépôt
                 if ($transaction->type === 'deposit') {
-                    $transaction->user->wallet()->increment('balance', $transaction->amount_sent);
+                    $transaction->user->wallet()->increment($balanceColumn, $transaction->amount_sent);
                 }
             } elseif (in_array($apiStatus, ['failed', 'failure', 'rejected', 'declined'])) {
                 $transaction->update([
@@ -52,13 +58,23 @@ class TransactionStatusUpdater
                 // qui n'a jamais été prélevé.
                 if (in_array($transaction->type, ['transfer', 'withdrawal'])) {
                     $refundAmount = $transaction->amount_sent + $transaction->fees;
-                    $transaction->user->wallet()->increment('balance', $refundAmount);
+                    $transaction->user->wallet()->increment($balanceColumn, $refundAmount);
                 }
             } else {
-                return;
+                return null;
             }
 
-            TransactionStatusUpdated::dispatch($transaction);
+            return $transaction;
         });
+
+        // Diffusé après le commit : une indisponibilité de Reverb ne doit jamais annuler
+        // la mise à jour du statut ni le remboursement.
+        if ($updated) {
+            try {
+                TransactionStatusUpdated::dispatch($updated);
+            } catch (Throwable $e) {
+                Log::warning("[TransactionStatusUpdater] Diffusion temps réel impossible pour {$updated->reference} : ".$e->getMessage());
+            }
+        }
     }
 }
