@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 
 /**
  * Traite une transaction sandbox sans jamais appeler Digitwave : le résultat est
- * simulé d'après la fin du numéro du destinataire, pour que le marchand puisse
+ * simulé d'après la fin du numéro du destinataire (numéro de compte pour un virement bancaire), pour que le marchand puisse
  * tester chaque cas de son intégration (documenté dans l'API marchande) :
  *
  *   - se termine par FAILURE_SUFFIX ('0002') : échec (transfert/retrait remboursés) ;
@@ -55,7 +55,10 @@ class SimulateSandboxTransactionJob implements ShouldQueue
             'submitted_at' => now(),
         ]);
 
-        $phone = (string) $transaction->recipient_phone;
+        // Virement bancaire : le scénario se pilote par la fin du numéro de compte du bénéficiaire.
+        $phone = $transaction->bank_beneficiary_id
+            ? (string) $transaction->bankBeneficiary?->account_number
+            : (string) $transaction->recipient_phone;
 
         if (str_ends_with($phone, self::PENDING_SUFFIX)) {
             return;

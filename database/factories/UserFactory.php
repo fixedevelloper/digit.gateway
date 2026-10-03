@@ -46,6 +46,16 @@ class UserFactory extends Factory
     }
 
     /**
+     * Indicate that the user is an agent traitant les transferts manuels.
+     */
+    public function agent(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'agent',
+        ]);
+    }
+
+    /**
      * Indicate that the user is a super administrator (seul rôle autorisé à ajuster un wallet).
      */
     public function superadmin(): static

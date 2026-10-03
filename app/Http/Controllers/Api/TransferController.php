@@ -36,7 +36,11 @@ class TransferController extends Controller
         $amount = (float) $request->amount;
 
         try {
-            $result = $this->transactions->createTransfer($user, $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']));
+            $result = $this->transactions->createTransfer(
+                $user,
+                $request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount']),
+                idempotencyKey: $request->header('Idempotency-Key'),
+            );
         } catch (ValidationException $e) {
             return response()->json([
                 'status' => 'error',
@@ -63,6 +67,8 @@ class TransferController extends Controller
             'exchange_rate' => (float) $result['transaction']->exchange_rate,
             'remaining_balance' => (float) $result['balance'],
             'request_id' => $result['transaction']->reference,
+            'processing_mode' => $result['transaction']->processing_mode->value,
+            'transfer_status' => $result['transaction']->status,
         ], 200);
     }
 

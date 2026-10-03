@@ -28,7 +28,7 @@ use Illuminate\Validation\Rule;
  * La logique de débit/verrouillage du wallet reste partagée avec l'app mobile
  * via TransactionService — seule la façade HTTP diffère.
  */
-#[Group('Merchant Gateway', "Endpoints B2B authentifiés par clé API (Authorization: Bearer sk_test_.../sk_live_...), pour une intégration serveur-à-serveur. Voir /api/merchants/register pour obtenir une clé.\n\n**Sandbox** : une clé `sk_test_` crée des transactions simulées (aucun mouvement réel), sur un solde de test distinct. Le résultat dépend de la fin du numéro du destinataire : `...0002` → échec (remboursé), `...0003` → reste en cours, tout autre numéro → succès.", weight: 1)]
+#[Group('Merchant Gateway', "Endpoints B2B authentifiés par clé API (Authorization: Bearer sk_test_.../sk_live_...), pour une intégration serveur-à-serveur. Voir /api/merchants/register pour obtenir une clé.\n\n**Sandbox** : une clé `sk_test_` crée des transactions simulées (aucun mouvement réel), sur un solde de test distinct. Le résultat dépend de la fin du numéro du destinataire : `...0002` → échec (remboursé), `...0003` → reste en cours, tout autre numéro → succès. Pour un virement bancaire, c'est la fin du numéro de compte du bénéficiaire qui pilote le résultat.", weight: 1)]
 class TransferController extends Controller
 {
     public function __construct(private readonly TransactionService $transactions)
@@ -170,7 +170,7 @@ class TransferController extends Controller
     {
         $validated = $request->validate([
             'type' => ['sometimes', Rule::in(['transfer', 'withdrawal', 'deposit', 'payment'])],
-            'status' => ['sometimes', Rule::in(['pending', 'processing', 'success', 'failed', 'reversed'])],
+            'status' => ['sometimes', Rule::in(['pending', 'pending_manual_review', 'assigned', 'processing', 'success', 'failed', 'rejected', 'cancelled', 'reversed'])],
             'date_from' => ['sometimes', 'date'],
             'date_to' => ['sometimes', 'date'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
@@ -214,8 +214,10 @@ class TransferController extends Controller
      * Détail et statut d'une transaction
      *
      * Retourne l'état courant (`pending`, `processing`, `success`, `failed`,
-     * `reversed`) et le détail complet d'une transaction du marchand, identifiée
-     * par sa référence.
+     * `reversed` ; pour un traitement manuel : `pending_manual_review`, `assigned`,
+     * `rejected`, `cancelled`) et le détail complet d'une transaction du marchand,
+     * identifiée par sa référence. `processing_mode` vaut `AUTOMATIC` ou `MANUAL`
+     * (pris en charge par un agent) ; un transfert `rejected` ou `failed` est remboursé.
      */
     public function show(Request $request, string $reference): JsonResponse
     {

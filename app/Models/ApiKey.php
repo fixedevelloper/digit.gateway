@@ -24,6 +24,7 @@ class ApiKey extends Model
      */
     public const SCOPES = [
         'transfer.write',
+        'bank_transfer.write',
         'withdrawal.write',
         'deposit.write',
         'wallet.read',

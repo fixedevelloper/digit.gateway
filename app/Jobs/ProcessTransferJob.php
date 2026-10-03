@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Contracts\PaymentGatewayContract;
+use App\Enums\ProcessingMode;
 use App\Jobs\Concerns\SubmitsToGatewayOnce;
 use App\Models\Transaction;
 use App\Services\CarrierRouter;
@@ -47,6 +48,17 @@ class ProcessTransferJob implements ShouldQueue
      */
     public function handle(PaymentGatewayContract $gateway, CarrierRouter $carrierRouter): void
     {
+        // Garde-fou : un transfert routé en manuel (ou sans mode automatique) n'est jamais
+        // envoyé à un provider, même si le job est dispatché par erreur.
+        if ($this->transaction->processing_mode !== ProcessingMode::Automatic) {
+            logger()->warning('[JOB TERMINATED] Transfert non automatique : aucun appel au provider', [
+                'ref' => $this->transaction->reference,
+                'mode' => $this->transaction->processing_mode?->value,
+            ]);
+
+            return;
+        }
+
         // Normalisation du nom du pays pour éviter les erreurs de casse ou d'espaces
         $country = trim($this->transaction->country_name ?? '');
 

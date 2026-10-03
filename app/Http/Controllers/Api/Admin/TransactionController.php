@@ -21,7 +21,8 @@ class TransactionController extends Controller
         $perPage = (int) $request->input('per_page', 20);
         $transactions = $this->filteredQuery($request)
             ->orderBy('created_at', 'desc')
-            ->paginate($perPage);
+            ->paginate($perPage)
+            ->through(fn (Transaction $t) => $t->makeVisible(Transaction::INTERNAL_FIELDS));
 
         return response()->json($transactions, 200);
     }

@@ -62,5 +62,20 @@ class UserSeeder extends Seeder
                 'currency' => 'XAF',
             ]
         );
+
+        /*
+        |--------------------------------------------------------------------------
+        | 3. COMPTE AGENT (traitement des transferts manuels)
+        |--------------------------------------------------------------------------
+        */
+        User::updateOrCreate(
+            ['phone' => '670000001'],
+            [
+                'name' => 'Agent Démo',
+                'password' => Hash::make('agent1234'),
+                'transaction_pin' => Hash::make('8888'),
+                'role' => 'agent',
+            ]
+        );
     }
 }

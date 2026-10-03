@@ -3,6 +3,12 @@
 namespace App\Providers;
 
 use App\Contracts\PaymentGatewayContract;
+use App\Models\Country;
+use App\Models\Provider;
+use App\Models\Transaction;
+use App\Policies\CountryPolicy;
+use App\Policies\ProviderPolicy;
+use App\Policies\TransferPolicy;
 use App\Services\Gateways\DigitwaveGateway;
 use Dedoc\Scramble\Scramble;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -42,6 +48,10 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perMinute(20)->by('ip:'.$request->ip()),
             ];
         });
+
+        Gate::policy(Transaction::class, TransferPolicy::class);
+        Gate::policy(Country::class, CountryPolicy::class);
+        Gate::policy(Provider::class, ProviderPolicy::class);
 
         // La doc marchande est publique (restreinte aux routes /v1/gateway/*, cf.
         // config/scramble.php) : sans ce gate, Scramble renvoie 403 hors environnement local.

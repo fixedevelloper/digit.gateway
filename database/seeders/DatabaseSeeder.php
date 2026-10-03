@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(CountrySeeder::class);
+        $this->call(ProviderSeeder::class);
 
         // Comptes de démonstration aux identifiants connus (superadmin / admin1234) :
         // jamais en production, l'admin réel se crée à la main (cf. deploy/README.md).

@@ -18,13 +18,22 @@ class PreventDuplicateRequest
 {
     private const LOCK_SECONDS = 15;
 
+    /** Scopes dont le service métier déduplique via `transactions.idempotency_key`. */
+    private const SCOPES_WITH_DURABLE_KEY = ['transfer', 'bank_transfer'];
+
     public function handle(Request $request, Closure $next, string $scope): Response
     {
+        // Une clé d'idempotence explicite est gérée durablement en base par le service métier,
+        // mais seulement pour ces opérations : retrait et dépôt gardent le verrou de 15 s.
+        if (trim((string) $request->header('Idempotency-Key')) !== '' && in_array($scope, self::SCOPES_WITH_DURABLE_KEY, true)) {
+            return $next($request);
+        }
+
         $fingerprint = sprintf(
             'idemp:%s:%d:%s',
             $scope,
             Auth::id(),
-            md5((string) json_encode($request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount', 'agensic_code'])))
+            md5((string) json_encode($request->only(['country', 'carrier', 'currency', 'operator_id', 'quote_id', 'number', 'amount', 'agensic_code', 'beneficiary'])))
         );
 
         if (! Cache::add($fingerprint, true, now()->addSeconds(self::LOCK_SECONDS))) {

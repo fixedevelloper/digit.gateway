@@ -2,16 +2,24 @@
 
 namespace App\Services;
 
+use App\Enums\ProcessingMode;
+use App\Events\TransferCreated;
+use App\Enums\TransferService;
 use App\Exceptions\TransactionValidationException;
 use App\Jobs\ProcessTransferJob;
 use App\Jobs\ProcessWithdrawalJob;
 use App\Jobs\SimulateSandboxTransactionJob;
 use App\Models\Agency;
+use App\Models\BankBeneficiary;
+use App\Models\Country;
+use App\Services\Banking\ManualBankTransferProvider;
+use App\Models\CountryService;
 use App\Models\Operator;
 use App\Models\Quote;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Wallet;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -36,8 +44,13 @@ use Illuminate\Validation\ValidationException;
  */
 class TransactionService
 {
-    public function __construct(private readonly ExchangeRateService $exchangeRates)
-    {
+    public function __construct(
+        private readonly ExchangeRateService $exchangeRates,
+        private readonly TransferRoutingService $routing,
+        private readonly TransferAuditService $audit,
+        private readonly FeeCalculator $fees,
+        private readonly ManualBankTransferProvider $manualBank,
+    ) {
     }
 
     /**
@@ -305,22 +318,46 @@ class TransactionService
 
     /**
      * Initie un transfert : débit immédiat du wallet (verrouillé pendant la transaction
-     * pour empêcher une double dépense), puis traitement asynchrone via ProcessTransferJob.
+     * pour empêcher une double dépense), puis routage par TransferRoutingService :
+     *  - AUTOMATIC : traitement asynchrone via ProcessTransferJob (Digitwave), statut `processing` ;
+     *  - MANUAL    : aucun appel provider, le transfert entre dans la file des agents
+     *                (statut `pending_manual_review`). Un rejet/échec rembourse le wallet.
+     * Les transferts sandbox ne sont jamais routés vers les agents (simulation).
+     *
+     * `$idempotencyKey` (durable, en base) : rejouer la même clé renvoie le transfert déjà
+     * créé (`replayed` = true) sans débiter une seconde fois.
      *
      * @param  array{country?:string,carrier?:string,currency?:string,operator_id?:int,quote_id?:string,number:string,amount:float|string}  $data
-     * @return array{transaction: Transaction, balance: float, fee: float, total: float}
+     * @return array{transaction: Transaction, balance: float, fee: float, total: float, replayed: bool}
      *
-     * @throws ValidationException si l'opérateur est invalide/hors bornes ou le solde insuffisant
+     * @throws ValidationException si l'opérateur est invalide/hors bornes, le service indisponible ou le solde insuffisant
      */
-    public function createTransfer(User $user, array $data, string $channel = 'mobile_app', string $environment = 'production'): array
+    public function createTransfer(User $user, array $data, string $channel = 'mobile_app', string $environment = 'production', ?string $idempotencyKey = null): array
     {
         $requestId = 'TX-'.strtoupper(Str::random(12));
         $balanceColumn = Wallet::balanceColumn($environment);
+        $idempotencyKey = $this->normalizeIdempotencyKey($idempotencyKey);
 
-        $result = DB::transaction(function () use ($user, $requestId, $data, $channel, $environment, $balanceColumn) {
+        $result = DB::transaction(function () use ($user, $requestId, $data, $channel, $environment, $balanceColumn, $idempotencyKey) {
             $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->firstOrFail();
+
+            // Le verrou du wallet sérialise les requêtes d'un même utilisateur : la
+            // vérification de la clé est donc exempte de course.
+            if ($existing = $this->findReplay($user, $idempotencyKey, TransferService::MobileMoney, fn (Transaction $t) => $t->recipient_phone === (string) $data['number']
+                && abs((float) $t->amount_sent - (float) $data['amount']) < 0.01)) {
+                return $this->replayResult($existing, $wallet, $balanceColumn);
+            }
+
             $prepared = $this->prepare($user, $wallet->currency, $data, 'transfer');
             $pricing = $prepared['pricing'];
+
+            $decision = $environment === 'sandbox'
+                ? new RoutingDecision(ProcessingMode::Automatic)
+                : $this->routing->route($prepared['operator']->country, TransferService::MobileMoney);
+
+            if ($decision->countryService) {
+                $this->assertWithinCountryLimits($decision->countryService, $user, $pricing['amount']);
+            }
 
             if ($wallet->{$balanceColumn} < $pricing['total']) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Insufficient fund/Balance.');
@@ -333,17 +370,257 @@ class TransactionService
                 'user_id' => $user->id,
                 'channel' => $channel,
                 'environment' => $environment,
-                'status' => 'processing',
+                'service' => TransferService::MobileMoney,
+                'processing_mode' => $decision->mode,
+                'provider_id' => $decision->provider?->id,
+                'destination_country_id' => $prepared['operator']->country_id,
+                'idempotency_key' => $idempotencyKey,
+                'status' => $decision->isManual() ? Transaction::STATUS_PENDING_MANUAL_REVIEW : 'processing',
             ]));
 
-            return ['transaction' => $transaction, 'balance' => $wallet->{$balanceColumn}, 'fee' => $pricing['fee'], 'total' => $pricing['total']];
+            $this->audit->record($transaction, TransferAuditService::CREATED, $user, null, $transaction->status, null, [
+                'processing_mode' => $decision->mode->value,
+                'provider' => $decision->provider?->code,
+            ]);
+
+            return ['transaction' => $transaction, 'balance' => $wallet->{$balanceColumn}, 'fee' => $pricing['fee'], 'total' => $pricing['total'], 'replayed' => false];
         });
 
         // Dispatché après commit (hors de la transaction DB) pour ne jamais traiter
-        // une transaction dont l'écriture n'a pas encore été validée.
-        $this->dispatchProcessing($result['transaction'], ProcessTransferJob::class);
+        // une transaction dont l'écriture n'a pas encore été validée. Un transfert manuel
+        // n'est jamais envoyé à un provider : il attend la prise en charge d'un agent.
+        if (! $result['replayed']) {
+            TransferCreated::dispatch($result['transaction']);
+        }
+
+        if (! $result['replayed'] && ! $result['transaction']->isManual()) {
+            $this->dispatchProcessing($result['transaction'], ProcessTransferJob::class);
+        }
 
         return $result;
+    }
+
+    /**
+     * Initie un virement bancaire vers un pays dont l'admin a activé BANK_TRANSFER.
+     * Même garanties que createTransfer (wallet verrouillé, idempotence en base, plafonds,
+     * audit). Frais issus de `fee_rules`, conversion au taux manuel de l'admin si la devise
+     * du pays diffère de celle du wallet. Aucun provider bancaire automatique n'étant
+     * implémenté, le transfert entre dans la file manuelle (`pending_manual_review`).
+     *
+     * @param  array{country:string,amount:float|string,beneficiary:array<string,mixed>}  $data
+     * @return array{transaction: Transaction, balance: float, fee: float, total: float, replayed: bool}
+     *
+     * @throws ValidationException
+     */
+    public function createBankTransfer(User $user, array $data, ?string $idempotencyKey = null, string $channel = 'mobile_app', string $environment = 'production'): array
+    {
+        $country = Country::resolveActive((string) $data['country']);
+
+        if (! $country) {
+            throw TransactionValidationException::make('INVALID_COUNTRY', 'country', 'Pays non supporté ou indisponible.');
+        }
+
+        $requestId = 'BT-'.strtoupper(Str::random(12));
+
+        $balanceColumn = Wallet::balanceColumn($environment);
+        $idempotencyKey = $this->normalizeIdempotencyKey($idempotencyKey);
+
+        $result = DB::transaction(function () use ($user, $country, $data, $requestId, $idempotencyKey, $channel, $environment, $balanceColumn) {
+            $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->firstOrFail();
+            $amount = (float) $data['amount'];
+
+            if ($existing = $this->findReplay($user, $idempotencyKey, TransferService::BankTransfer, fn (Transaction $t) => $t->destination_country_id === $country->id
+                && abs((float) $t->amount_sent - $amount) < 0.01)) {
+                return $this->replayResult($existing, $wallet, $balanceColumn);
+            }
+
+            // Le service doit être ouvert pour le pays même en sandbox ; mais un transfert sandbox
+            // n'entre jamais dans la file des agents : il est simulé (SimulateSandboxTransactionJob).
+            $decision = $this->routing->route($country, TransferService::BankTransfer);
+            $sandbox = $environment === 'sandbox';
+
+            if (! $sandbox && ! $decision->isManual()) {
+                // Aucun provider bancaire automatique n'est implémenté (config/transfers.php) :
+                // le routage ne peut donc pas renvoyer ce cas aujourd'hui.
+                throw new \LogicException('Aucun provider bancaire automatique implémenté.');
+            }
+
+            if ($decision->countryService) {
+                $this->assertWithinCountryLimits($decision->countryService, $user, $amount);
+            }
+
+            $walletCurrency = $wallet->currency;
+            $destCurrency = strtoupper($country->currency ?: $walletCurrency);
+            $rate = $this->exchangeRates->rate($destCurrency, $walletCurrency);
+            $converted = $this->exchangeRates->floor($amount / $rate, $destCurrency);
+            $fee = $this->fees->compute($country, TransferService::BankTransfer, $decision->provider, $walletCurrency, $amount);
+            $total = $amount + $fee;
+
+            if ((float) $wallet->{$balanceColumn} < $total) {
+                throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Insufficient fund/Balance.');
+            }
+
+            $wallet->decrement($balanceColumn, $total);
+
+            $beneficiary = BankBeneficiary::create(array_merge(
+                Arr::only($data['beneficiary'], BankBeneficiary::FIELDS),
+                ['user_id' => $user->id, 'country_id' => $country->id]
+            ));
+
+            $status = $sandbox
+                ? 'processing'
+                : $this->manualBank->transfer([
+                    'reference' => $requestId,
+                    'amount' => $converted,
+                    'currency' => $destCurrency,
+                    'country' => $country->iso,
+                    'beneficiary' => $beneficiary->toArray(),
+                ])->status;
+
+            $transaction = Transaction::create([
+                'reference' => $requestId,
+                'type' => 'transfer',
+                'service' => TransferService::BankTransfer,
+                'processing_mode' => $sandbox ? ProcessingMode::Automatic : $decision->mode,
+                'provider_id' => null,
+                'channel' => $channel,
+                'environment' => $environment,
+                'user_id' => $user->id,
+                'bank_beneficiary_id' => $beneficiary->id,
+                'recipient_name' => $beneficiary->full_name,
+                'recipient_phone' => (string) $beneficiary->phone,
+                'recipient_operator' => 'BANK',
+                'destination_country_id' => $country->id,
+                'country_name' => $country->name,
+                'amount_sent' => $amount,
+                'currency_sent' => $walletCurrency,
+                'fees' => $fee,
+                'exchange_rate' => $rate,
+                'amount_to_receive' => $converted,
+                'currency_received' => $destCurrency,
+                'idempotency_key' => $idempotencyKey,
+                'status' => $status,
+            ]);
+
+            $this->audit->record($transaction, TransferAuditService::CREATED, $user, null, $transaction->status, null, [
+                'processing_mode' => $transaction->processing_mode->value,
+                'service' => TransferService::BankTransfer->value,
+            ]);
+
+            return ['transaction' => $transaction, 'balance' => (float) $wallet->{$balanceColumn}, 'fee' => $fee, 'total' => $total, 'replayed' => false];
+        });
+
+        if (! $result['replayed']) {
+            TransferCreated::dispatch($result['transaction']);
+
+            if ($environment === 'sandbox') {
+                SimulateSandboxTransactionJob::dispatch($result['transaction']);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Une clé vide équivaut à « pas de clé » ; une clé trop longue pour la colonne est refusée
+     * proprement (sinon l'insertion échouerait en erreur 500 après le débit annulé).
+     */
+    private function normalizeIdempotencyKey(?string $key): ?string
+    {
+        $key = trim((string) $key);
+
+        if ($key === '') {
+            return null;
+        }
+
+        if (mb_strlen($key) > 100) {
+            throw TransactionValidationException::make('INVALID_IDEMPOTENCY_KEY', 'idempotency_key', "La clé d'idempotence ne doit pas dépasser 100 caractères.");
+        }
+
+        return $key;
+    }
+
+    /**
+     * Transfert déjà créé avec cette clé pour cet utilisateur, ou null. La clé est unique par
+     * utilisateur tous services confondus : la réutiliser pour un autre service, ou avec une
+     * requête différente (`$matches` faux), est refusée au lieu de rejouer un mauvais transfert.
+     *
+     * @param  callable(Transaction): bool  $matches
+     */
+    private function findReplay(User $user, ?string $key, TransferService $service, callable $matches): ?Transaction
+    {
+        if ($key === null) {
+            return null;
+        }
+
+        $existing = Transaction::where('user_id', $user->id)->where('idempotency_key', $key)->first();
+
+        if (! $existing) {
+            return null;
+        }
+
+        if ($existing->service !== $service || ! $matches($existing)) {
+            throw TransactionValidationException::make('IDEMPOTENCY_KEY_REUSED', 'idempotency_key', "Cette clé d'idempotence a déjà été utilisée avec une requête différente.");
+        }
+
+        return $existing;
+    }
+
+    /** @return array{transaction: Transaction, balance: float, fee: float, total: float, replayed: bool} */
+    private function replayResult(Transaction $existing, Wallet $wallet, string $balanceColumn): array
+    {
+        return [
+            'transaction' => $existing,
+            'balance' => (float) $wallet->{$balanceColumn},
+            'fee' => (float) $existing->fees,
+            'total' => (float) $existing->amount_sent + (float) $existing->fees,
+            'replayed' => true,
+        ];
+    }
+
+    /**
+     * Retrait et dépôt n'ont pas de traitement manuel : ils ne sont possibles que si le pays
+     * est routé en automatique. Un pays désactivé, un service en MANUAL ou Digitwave coupé par
+     * l'admin les refuse (comme TransferRoutingService le fait pour les transferts).
+     */
+    private function assertAutomaticRoute(Operator $operator, string $environment): void
+    {
+        if ($environment === 'sandbox') {
+            return;
+        }
+
+        if ($this->routing->route($operator->country, TransferService::MobileMoney)->isManual()) {
+            throw TransactionValidationException::make('SERVICE_UNAVAILABLE', 'country', "Ce service est momentanément indisponible pour « {$operator->country->name} ».");
+        }
+    }
+
+    /**
+     * Applique les bornes et plafonds (journalier / mensuel) configurés par l'admin pour
+     * le service du pays, dans la devise du wallet. Les transferts échoués, rejetés ou
+     * annulés ne consomment pas le plafond.
+     */
+    private function assertWithinCountryLimits(CountryService $config, User $user, float $amount): void
+    {
+        if (($config->min_amount !== null && $amount < (float) $config->min_amount)
+            || ($config->max_amount !== null && $amount > (float) $config->max_amount)) {
+            throw TransactionValidationException::make('AMOUNT_OUT_OF_BOUNDS', 'amount', 'Montant hors des limites autorisées pour ce pays.');
+        }
+
+        $used = fn ($since) => (float) Transaction::where('user_id', $user->id)
+            ->where('destination_country_id', $config->country_id)
+            ->where('service', $config->service->value)
+            ->where('environment', 'production')
+            ->whereNotIn('status', ['failed', 'reversed', Transaction::STATUS_REJECTED, Transaction::STATUS_CANCELLED])
+            ->where('created_at', '>=', $since)
+            ->sum('amount_sent');
+
+        if ($config->daily_limit !== null && $used(now()->startOfDay()) + $amount > (float) $config->daily_limit) {
+            throw TransactionValidationException::make('DAILY_LIMIT_EXCEEDED', 'amount', 'Plafond journalier dépassé pour ce pays.');
+        }
+
+        if ($config->monthly_limit !== null && $used(now()->startOfMonth()) + $amount > (float) $config->monthly_limit) {
+            throw TransactionValidationException::make('MONTHLY_LIMIT_EXCEEDED', 'amount', 'Plafond mensuel dépassé pour ce pays.');
+        }
     }
 
     /**
@@ -364,6 +641,7 @@ class TransactionService
             $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->firstOrFail();
             $prepared = $this->prepare($user, $wallet->currency, $data, 'withdrawal');
             $pricing = $prepared['pricing'];
+            $this->assertAutomaticRoute($prepared['operator'], $environment);
 
             if ($wallet->{$balanceColumn} < $pricing['total']) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Solde insuffisant pour effectuer ce retrait.');
@@ -407,6 +685,7 @@ class TransactionService
         // Une erreur (opérateur, cotation) annule tout : rien n'est écrit.
         [$transaction, $pricing] = DB::transaction(function () use ($user, $wallet, $requestId, $data, $channel, $environment) {
             $prepared = $this->prepare($user, $wallet->currency, $data, 'deposit');
+            $this->assertAutomaticRoute($prepared['operator'], $environment);
 
             $transaction = Transaction::create(array_merge($this->transactionAttributes($prepared, $data, 'deposit'), [
                 'reference' => $requestId,

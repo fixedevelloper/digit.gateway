@@ -51,11 +51,29 @@ class Country extends Model
     }
 
     /**
+     * Pays actif désigné par son nom exact ou son code ISO (insensible à la casse pour l'ISO).
+     */
+    public static function resolveActive(string $nameOrIso): ?self
+    {
+        return static::active()
+            ->where(fn ($q) => $q->where('name', $nameOrIso)->orWhere('iso', strtoupper($nameOrIso)))
+            ->first();
+    }
+
+    /**
      * Obtenir les opérateurs disponibles pour ce pays.
      */
     public function operators(): HasMany
     {
         return $this->hasMany(Operator::class)->where('status', true);
+    }
+
+    /**
+     * Services (Mobile Money, virement bancaire) activés pour ce pays, avec leur provider.
+     */
+    public function services(): HasMany
+    {
+        return $this->hasMany(CountryService::class);
     }
 
     /**

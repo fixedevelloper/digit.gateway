@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\ApiKeyAuth;
 use App\Http\Middleware\CheckAdminRole;
+use App\Http\Middleware\CheckAgentRole;
 use App\Http\Middleware\CheckMerchantRole;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\Merchant\IdempotencyKey;
@@ -31,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'active' => EnsureUserIsActive::class,
             'admin.role' => CheckAdminRole::class,
             'merchant.role' => CheckMerchantRole::class,
+            'agent.role' => CheckAgentRole::class,
             'auth.apikey' => ApiKeyAuth::class,
             'idempotency.key' => IdempotencyKey::class,
             'pin.verify' => VerifyTransactionPin::class,

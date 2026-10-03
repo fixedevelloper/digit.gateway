@@ -17,7 +17,7 @@ class CountryController extends Controller
     public function index()
     {
         // Récupération des pays triés par nom
-        $countries = Country::with('forcedOperator')->orderBy('name', 'asc')->get();
+        $countries = Country::with(['forcedOperator', 'services'])->orderBy('name', 'asc')->get();
 
         // Si tu stockes un chemin relatif, tu peux injecter dynamiquement l'URL absolue ici
         $countries->transform(function ($country) {
