@@ -164,6 +164,7 @@ $registerApiRoutes = function () {
         Route::get('/country-services', [CountryServiceController::class, 'index']);
         Route::post('/country-services', [CountryServiceController::class, 'store']);
         Route::put('/country-services/{id}', [CountryServiceController::class, 'update']);
+        Route::delete('/country-services/{id}', [CountryServiceController::class, 'destroy']);
 
         Route::get('/fee-rules', [FeeRuleController::class, 'index']);
         Route::post('/fee-rules', [FeeRuleController::class, 'store']);

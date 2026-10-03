@@ -64,6 +64,15 @@ class CountryServiceController extends Controller
         return response()->json(['status' => 'success', 'data' => $config->fresh()->load('provider')]);
     }
 
+    public function destroy(string $id): JsonResponse
+    {
+        Gate::authorize('manage', Country::class);
+
+        CountryService::findOrFail($id)->delete();
+
+        return response()->json(['status' => 'success']);
+    }
+
     private function rules(bool $sometimes = false): array
     {
         $s = $sometimes ? 'sometimes|' : '';
