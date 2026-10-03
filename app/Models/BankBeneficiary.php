@@ -14,6 +14,7 @@ class BankBeneficiary extends Model
     public const FIELDS = [
         'full_name', 'phone', 'email', 'bank_name', 'bank_code', 'branch_code',
         'account_number', 'iban', 'swift_bic', 'address', 'city',
+        'reference', 'pix', 'bre_b', 'spei',
     ];
 
     protected $fillable = ['user_id', 'country_id', ...self::FIELDS];

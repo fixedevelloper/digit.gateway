@@ -31,7 +31,7 @@ class AgentTransferResource extends JsonResource
             'processing_mode' => $this->processing_mode->value,
             'operator' => $this->recipient_operator,
             'beneficiary' => $bank
-                ? $bank->only(['full_name', 'phone', 'email', 'bank_name', 'bank_code', 'branch_code', 'account_number', 'iban', 'swift_bic', 'address', 'city'])
+                ? $bank->only(['full_name', 'phone', 'email', 'bank_name', 'bank_code', 'branch_code', 'account_number', 'iban', 'swift_bic', 'address', 'city', 'reference', 'pix', 'bre_b', 'spei'])
                 : ['full_name' => $this->recipient_name, 'phone' => $this->recipient_phone, 'operator' => $this->recipient_operator],
             'priority' => $this->priority,
             'status' => $this->status,

@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Admin\FeeRuleController;
 use App\Http\Controllers\Api\Admin\ProviderController;
 use App\Http\Controllers\Api\Admin\TransferController as AdminTransferController;
 use App\Http\Controllers\Api\Admin\DashboardController;
+use App\Http\Controllers\Api\Admin\CurrencyController;
 use App\Http\Controllers\Api\Admin\ExchangeRateController;
 use App\Http\Controllers\Api\Admin\MerchantController;
 use App\Http\Controllers\Api\Admin\OperatorController;
@@ -150,6 +151,12 @@ $registerApiRoutes = function () {
         // Taux de change manuels (ajout seul : chaque modification crée une nouvelle ligne)
         Route::get('/exchange-rates', [ExchangeRateController::class, 'index']);
         Route::post('/exchange-rates', [ExchangeRateController::class, 'store']);
+
+        // Devises (nom + symbole)
+        Route::get('/currencies', [CurrencyController::class, 'index']);
+        Route::post('/currencies', [CurrencyController::class, 'store']);
+        Route::put('/currencies/{id}', [CurrencyController::class, 'update']);
+        Route::delete('/currencies/{id}', [CurrencyController::class, 'destroy']);
 
         // Gestion des Pays / Corridors régionaux
         Route::get('/countries', [App\Http\Controllers\Api\Admin\CountryController::class, 'index']);

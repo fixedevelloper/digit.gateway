@@ -29,7 +29,7 @@ class BankTransferController extends Controller
      *
      * Pays où le virement bancaire est ouvert, avec leur devise et les champs du bénéficiaire
      * obligatoires pour ce pays (`required_fields`). Les autres champs (`full_name`, `phone`,
-     * `email`, `bank_name`, `bank_code`, `branch_code`, `account_number`, `iban`, `swift_bic`,
+     * `email`, `bank_name`, `bank_code`, `branch_code`, `account_number`, `iban`, `swift_bic`, `reference`, `pix`, `bre_b`, `spei`,
      * `address`, `city`) sont acceptés mais facultatifs.
      */
     public function countries(BankCountryCatalog $catalog): JsonResponse

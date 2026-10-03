@@ -37,6 +37,10 @@ class BankTransferRequest extends FormRequest
             'bank_code' => 'string|max:30',
             'branch_code' => 'string|max:30',
             'account_number' => 'string|max:50',
+            'reference' => 'string|max:100',
+            'pix' => 'string|max:100',
+            'bre_b' => 'string|max:100',
+            'spei' => 'string|max:18',
         ];
 
         foreach (BankBeneficiary::FIELDS as $field) {
