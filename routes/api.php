@@ -63,6 +63,7 @@ $registerApiRoutes = function () {
     Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/profile', [AuthController::class, 'profile']);
+        Route::post('/legal/accept', [AuthController::class, 'acceptLegal']);
 
         Route::post('/profile/update', [UserController::class, 'updateProfile']);
         Route::post('/profile/update-pin', [UserController::class, 'updateCodePin']);
@@ -90,6 +91,7 @@ $registerApiRoutes = function () {
         // Virement bancaire (pays dont BANK_TRANSFER est activé par l'admin) : traitement manuel par les agents.
         Route::get('/bank-transfer/countries', [BankTransferController::class, 'countries']);
         Route::get('/bank-transfer/requirements', [BankTransferController::class, 'requirements']);
+        Route::post('/bank-transfer/estimate', [BankTransferController::class, 'estimate'])->middleware('throttle:60,1');
         Route::post('/bank-transfer', [BankTransferController::class, 'store'])
             ->middleware(['pin.verify', 'idempotent:bank_transfer']);
         Route::post('/withdrawal', [TransferController::class, 'initiateWithdrawal'])

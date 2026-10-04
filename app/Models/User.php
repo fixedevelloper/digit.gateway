@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'password', 'phone', 'transaction_pin', 'email', 'company_name', 'environment', 'status', 'role'])]
+#[Fillable(['name', 'password', 'phone', 'transaction_pin', 'email', 'company_name', 'environment', 'status', 'role', 'terms_version', 'terms_accepted_at', 'privacy_version', 'privacy_accepted_at'])]
 #[Hidden(['password', 'remember_token', 'transaction_pin'])] // <- On cache aussi l'api_key des réponses JSON par sécurité
 class User extends Authenticatable
 {
@@ -32,6 +32,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'transaction_pin' => 'hashed',
             'status' => 'boolean',
+            'terms_accepted_at' => 'datetime',
+            'privacy_accepted_at' => 'datetime',
         ];
     }
 
@@ -47,6 +49,44 @@ class User extends Authenticatable
                 'currency' => 'XAF',
             ]);
         });
+    }
+
+    public function legalAcceptances(): HasMany
+    {
+        return $this->hasMany(LegalAcceptance::class);
+    }
+
+    /**
+     * Vrai tant que l'utilisateur n'a pas accepté les versions en vigueur des CGU et de la politique de confidentialité.
+     */
+    public function legalAcceptanceRequired(): bool
+    {
+        $accepted = $this->legalAcceptances()
+            ->where(fn ($q) => $q
+                ->where(fn ($q) => $q->where('document', 'terms')->where('version', config('legal.terms_version')))
+                ->orWhere(fn ($q) => $q->where('document', 'privacy')->where('version', config('legal.privacy_version'))))
+            ->count();
+
+        return $accepted < 2;
+    }
+
+    /**
+     * Enregistre l'acceptation (historique + dernier état sur la ligne user). Horodatage fixé par le serveur.
+     */
+    public function recordLegalAcceptance(string $termsVersion, string $privacyVersion, ?string $ip = null, ?string $userAgent = null): void
+    {
+        $now = now();
+        $meta = ['accepted_at' => $now, 'ip_address' => $ip, 'user_agent' => $userAgent ? substr($userAgent, 0, 255) : null];
+
+        $this->legalAcceptances()->updateOrCreate(['document' => 'terms', 'version' => $termsVersion], $meta);
+        $this->legalAcceptances()->updateOrCreate(['document' => 'privacy', 'version' => $privacyVersion], $meta);
+
+        $this->forceFill([
+            'terms_version' => $termsVersion,
+            'terms_accepted_at' => $now,
+            'privacy_version' => $privacyVersion,
+            'privacy_accepted_at' => $now,
+        ])->save();
     }
 
     /**

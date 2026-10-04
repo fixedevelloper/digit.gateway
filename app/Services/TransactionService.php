@@ -401,6 +401,69 @@ class TransactionService
     }
 
     /**
+     * Estimation d'un virement bancaire (frais, total débité, montant reçu) sans rien écrire : mêmes règles
+     * que createBankTransfer (routage, limites du pays, frais, taux), solde du wallet compris.
+     *
+     * @return array{amount: float, fee: float, total: float, currency: string, amount_received: float, currency_received: string, rate: float, balance: float}
+     */
+    public function estimateBankTransfer(User $user, string $countryCode, float $amount, string $environment = 'production'): array
+    {
+        $country = Country::resolveActive($countryCode);
+
+        if (! $country) {
+            throw TransactionValidationException::make('INVALID_COUNTRY', 'country', 'Pays non supporté ou indisponible.');
+        }
+
+        $wallet = Wallet::where('user_id', $user->id)->firstOrFail();
+        $price = $this->priceBankTransfer($user, $country, $wallet->currency, $amount, $environment === 'sandbox');
+        $balance = (float) $wallet->{Wallet::balanceColumn($environment)};
+
+        if ($balance < $price['total']) {
+            throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Insufficient fund/Balance.');
+        }
+
+        return [
+            'amount' => $amount,
+            'fee' => $price['fee'],
+            'total' => $price['total'],
+            'currency' => $wallet->currency,
+            'amount_received' => $price['converted'],
+            'currency_received' => $price['destCurrency'],
+            'rate' => $price['rate'],
+            'balance' => $balance,
+        ];
+    }
+
+    /**
+     * Routage, limites du pays, taux et frais d'un virement bancaire : source unique partagée par
+     * l'estimation et la création, pour que le montant annoncé soit celui réellement débité.
+     */
+    private function priceBankTransfer(User $user, Country $country, string $walletCurrency, float $amount, bool $sandbox): array
+    {
+        // Le service doit être ouvert pour le pays même en sandbox ; mais un transfert sandbox
+        // n'entre jamais dans la file des agents : il est simulé (SimulateSandboxTransactionJob).
+        $decision = $this->routing->route($country, TransferService::BankTransfer);
+
+        if (! $sandbox && ! $decision->isManual()) {
+            // Aucun provider bancaire automatique n'est implémenté (config/transfers.php) :
+            // le routage ne peut donc pas renvoyer ce cas aujourd'hui.
+            throw new \LogicException('Aucun provider bancaire automatique implémenté.');
+        }
+
+        if ($decision->countryService) {
+            $this->assertWithinCountryLimits($decision->countryService, $user, $amount);
+        }
+
+        $destCurrency = strtoupper($country->currency ?: $walletCurrency);
+        $rate = $this->exchangeRates->rate($destCurrency, $walletCurrency);
+        $converted = $this->exchangeRates->floor($amount / $rate, $destCurrency);
+        $fee = $this->fees->compute($country, TransferService::BankTransfer, $decision->provider, $walletCurrency, $amount);
+        $total = $amount + $fee;
+
+        return compact('decision', 'destCurrency', 'rate', 'converted', 'fee', 'total');
+    }
+
+    /**
      * Initie un virement bancaire vers un pays dont l'admin a activé BANK_TRANSFER.
      * Même garanties que createTransfer (wallet verrouillé, idempotence en base, plafonds,
      * audit). Frais issus de `fee_rules`, conversion au taux manuel de l'admin si la devise
@@ -434,27 +497,11 @@ class TransactionService
                 return $this->replayResult($existing, $wallet, $balanceColumn);
             }
 
-            // Le service doit être ouvert pour le pays même en sandbox ; mais un transfert sandbox
-            // n'entre jamais dans la file des agents : il est simulé (SimulateSandboxTransactionJob).
-            $decision = $this->routing->route($country, TransferService::BankTransfer);
             $sandbox = $environment === 'sandbox';
-
-            if (! $sandbox && ! $decision->isManual()) {
-                // Aucun provider bancaire automatique n'est implémenté (config/transfers.php) :
-                // le routage ne peut donc pas renvoyer ce cas aujourd'hui.
-                throw new \LogicException('Aucun provider bancaire automatique implémenté.');
-            }
-
-            if ($decision->countryService) {
-                $this->assertWithinCountryLimits($decision->countryService, $user, $amount);
-            }
-
             $walletCurrency = $wallet->currency;
-            $destCurrency = strtoupper($country->currency ?: $walletCurrency);
-            $rate = $this->exchangeRates->rate($destCurrency, $walletCurrency);
-            $converted = $this->exchangeRates->floor($amount / $rate, $destCurrency);
-            $fee = $this->fees->compute($country, TransferService::BankTransfer, $decision->provider, $walletCurrency, $amount);
-            $total = $amount + $fee;
+
+            ['decision' => $decision, 'destCurrency' => $destCurrency, 'rate' => $rate, 'converted' => $converted, 'fee' => $fee, 'total' => $total]
+                = $this->priceBankTransfer($user, $country, $walletCurrency, $amount, $sandbox);
 
             if ((float) $wallet->{$balanceColumn} < $total) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Insufficient fund/Balance.');

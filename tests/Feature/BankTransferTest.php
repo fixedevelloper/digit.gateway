@@ -184,4 +184,36 @@ class BankTransferTest extends TestCase
             ->assertJsonPath('countries.1.iso', 'SN')
             ->assertJsonPath('countries.1.required_fields', ['full_name', 'bank_name', 'account_number']);
     }
+
+    public function test_estimate_matches_the_real_transfer_and_writes_nothing(): void
+    {
+        $this->bankCountry();
+        $user = $this->sender();
+
+        $this->postJson('/api/bank-transfer/estimate', ['country' => 'SN', 'amount' => 10000])
+            ->assertOk()
+            ->assertJsonPath('data.fee', 600)
+            ->assertJsonPath('data.total', 10600)
+            ->assertJsonPath('data.currency', 'XAF')
+            ->assertJsonPath('data.amount_received', 10000);
+
+        $this->assertSame(0, Transaction::count());
+        $this->assertEquals(100000, (float) $user->wallet()->first()->balance);
+
+        $this->postJson('/api/bank-transfer', $this->payload())->assertOk()->assertJson(['fee_charged' => 600.0, 'total' => 10600.0]);
+    }
+
+    public function test_estimate_rejects_insufficient_balance_and_unknown_country(): void
+    {
+        $this->bankCountry();
+        $this->sender(5000);
+
+        $this->postJson('/api/bank-transfer/estimate', ['country' => 'SN', 'amount' => 10000])
+            ->assertStatus(422)->assertJsonPath('error_code', 'INSUFFICIENT_FUNDS');
+
+        $this->postJson('/api/bank-transfer/estimate', ['country' => 'ZZ', 'amount' => 10000])
+            ->assertStatus(422)->assertJsonPath('error_code', 'INVALID_COUNTRY');
+
+        $this->postJson('/api/bank-transfer/estimate', ['country' => 'SN'])->assertStatus(422);
+    }
 }

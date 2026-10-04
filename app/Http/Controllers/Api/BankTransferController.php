@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\TransactionValidationException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\BankTransferRequest;
 use App\Models\Country;
@@ -55,6 +56,33 @@ class BankTransferController extends Controller
             'country' => $country->name,
             'required_fields' => $requirements->requiredFor($country),
         ]);
+    }
+
+    /**
+     * Estimer un virement bancaire
+     *
+     * Renvoie les frais, le total débité et le montant reçu par le bénéficiaire pour un montant
+     * donné, avec les mêmes règles que la création (limites du pays, frais, taux, solde). Rien n'est
+     * débité ni enregistré ; le taux n'est pas verrouillé et peut légèrement évoluer avant la création.
+     */
+    public function estimate(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'country' => 'required|string',
+            'amount' => 'required|numeric|min:1',
+        ]);
+
+        try {
+            $estimate = $this->transactions->estimateBankTransfer($request->user(), $data['country'], (float) $data['amount']);
+        } catch (TransactionValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'error_code' => $e->errorCode,
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 422);
+        }
+
+        return response()->json(['status' => 'success', 'data' => $estimate]);
     }
 
     /**
