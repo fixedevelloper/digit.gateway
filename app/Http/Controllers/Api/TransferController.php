@@ -252,6 +252,60 @@ class TransferController extends Controller
     }
 
     /**
+     * Statistiques agrégées de l'utilisateur sur une période.
+     *
+     * URL: GET /api/stats?period=week|month|year
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            if (!$user) {
+                return response()->json(['status' => 'error', 'message' => 'Unauthenticated.'], 401);
+            }
+
+            $now = now();
+            $since = match ($request->query('period', 'month')) {
+                'week' => $now->copy()->subDays(6)->startOfDay(),
+                'year' => $now->copy()->startOfYear(),
+                default => $now->copy()->startOfMonth(),
+            };
+
+            $okStatuses = ['success', 'completed'];
+            $koStatuses = ['failed', 'rejected', 'reversed'];
+
+            $base = fn () => Transaction::where('user_id', $user->id)->where('created_at', '>=', $since);
+
+            $inflow = (float) $base()->whereIn('status', $okStatuses)->where('type', 'deposit')->sum('amount_sent');
+            $outflow = (float) $base()->whereIn('status', $okStatuses)->whereIn('type', ['transfer', 'withdrawal'])->sum('amount_sent');
+
+            $ok = $base()->whereIn('status', $okStatuses)->count();
+            $ko = $base()->whereIn('status', $koStatuses)->count();
+
+            $operators = $base()->whereIn('status', $okStatuses)
+                ->selectRaw('recipient_operator as operator, SUM(amount_sent) as volume')
+                ->groupBy('recipient_operator')
+                ->orderByDesc('volume')
+                ->get()
+                ->map(fn ($r) => ['operator' => $r->operator ?: 'Opérateur', 'volume' => (float) $r->volume])
+                ->values();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'inflow' => $inflow,
+                    'outflow' => $outflow,
+                    'success_rate' => ($ok + $ko) > 0 ? (int) round($ok * 100 / ($ok + $ko)) : 0,
+                    'operators' => $operators,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('stats error: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => 'Impossible de charger les statistiques.'], 500);
+        }
+    }
+
+    /**
      * Vérifier le statut d'une transaction (par paramètre de requête)
      *
      * Alias de GET /transactions/{id}/status attendant l'identifiant via `?request_id=...`

@@ -111,6 +111,7 @@ $registerApiRoutes = function () {
         Route::get('/get_request', [TransferController::class, 'checkStatus']);
         Route::get('/transactions', [TransferController::class, 'recentTransactions']); // Ajouté pour correspondre à ton ApiClient
         Route::get('/history', [TransferController::class, 'historyList']);            // Ajouté pour correspondre à ton ApiClient
+        Route::get('/stats', [TransferController::class, 'stats']);
         Route::get('/transactions/{id}/status', [TransferController::class, 'getTransactionStatus']);
     });
 
