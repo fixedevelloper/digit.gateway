@@ -7,6 +7,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class WalletAdjustment extends Model
 {
+    public const PENDING = 'pending';
+
+    public const APPROVED = 'approved';
+
+    public const REJECTED = 'rejected';
+
     protected $fillable = [
         'wallet_id',
         'admin_id',
@@ -15,12 +21,17 @@ class WalletAdjustment extends Model
         'balance_before',
         'balance_after',
         'reason',
+        'status',
+        'reviewed_by',
+        'reviewed_at',
+        'rejection_reason',
     ];
 
     protected $casts = [
         'amount' => 'float',
         'balance_before' => 'float',
         'balance_after' => 'float',
+        'reviewed_at' => 'datetime',
     ];
 
     public function wallet(): BelongsTo
@@ -31,5 +42,10 @@ class WalletAdjustment extends Model
     public function admin(): BelongsTo
     {
         return $this->belongsTo(User::class, 'admin_id');
+    }
+
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
     }
 }

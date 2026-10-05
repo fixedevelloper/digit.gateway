@@ -22,7 +22,7 @@ class UserController extends Controller
         $users = User::where('role', 'customer')
             ->with('wallet:id,user_id,balance,currency')
             ->latest()
-            ->get(['id', 'name', 'phone', 'email', 'status', 'created_at']);
+            ->get(['id', 'name', 'phone', 'email', 'status', 'kyc_level', 'created_at']);
 
         return response()->json($users, 200);
     }

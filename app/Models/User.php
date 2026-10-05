@@ -14,7 +14,7 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
 #[Fillable(['name', 'password', 'phone', 'transaction_pin', 'email', 'company_name', 'environment', 'status', 'role', 'terms_version', 'terms_accepted_at', 'privacy_version', 'privacy_accepted_at'])]
-#[Hidden(['password', 'remember_token', 'transaction_pin'])] // <- On cache aussi l'api_key des réponses JSON par sécurité
+#[Hidden(['password', 'remember_token', 'transaction_pin', 'two_factor_secret', 'two_factor_recovery_codes', 'two_factor_last_step'])] // <- On cache aussi l'api_key des réponses JSON par sécurité
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -34,6 +34,9 @@ class User extends Authenticatable
             'status' => 'boolean',
             'terms_accepted_at' => 'datetime',
             'privacy_accepted_at' => 'datetime',
+            'two_factor_secret' => 'encrypted',
+            'two_factor_recovery_codes' => 'encrypted:array',
+            'two_factor_confirmed_at' => 'datetime',
         ];
     }
 
@@ -49,6 +52,11 @@ class User extends Authenticatable
                 'currency' => 'XAF',
             ]);
         });
+    }
+
+    public function hasTwoFactorEnabled(): bool
+    {
+        return $this->two_factor_confirmed_at !== null && $this->two_factor_secret !== null;
     }
 
     public function legalAcceptances(): HasMany
@@ -111,5 +119,13 @@ class User extends Authenticatable
     public function apiKeys(): HasMany
     {
         return $this->hasMany(ApiKey::class);
+    }
+
+    /**
+     * URLs de webhook du compte marchand.
+     */
+    public function webhookEndpoints(): HasMany
+    {
+        return $this->hasMany(WebhookEndpoint::class);
     }
 }

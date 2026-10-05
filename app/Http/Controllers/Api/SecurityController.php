@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Security\TwoFactorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -52,11 +53,46 @@ class SecurityController extends Controller
             ], 403);
         }
 
-        // 5. Génération du Token avec capacités définies (Laravel Sanctum)
+        // 5. 2FA activée : le mot de passe seul ne donne pas de token, il ouvre un défi à usage limité.
+        if ($user->hasTwoFactorEnabled()) {
+            return response()->json([
+                'status' => 'two_factor_required',
+                'challenge' => app(TwoFactorService::class)->issueChallenge($user, 'admin'),
+            ], 200);
+        }
+
+        return $this->session($user);
+    }
+
+    /**
+     * Seconde étape de connexion : code TOTP (ou code de secours) + jeton de défi.
+     *
+     * URL: POST /api/admin/auth/2fa
+     */
+    public function twoFactor(Request $request, TwoFactorService $twoFactor)
+    {
+        $data = $request->validate([
+            'challenge' => 'required|string',
+            'code' => 'nullable|string|max:20',
+            'recovery_code' => 'nullable|string|max:20',
+        ]);
+
+        $user = $twoFactor->resolveChallenge($data['challenge'], 'admin', $data['code'] ?? null, $data['recovery_code'] ?? null);
+
+        if (! $user || ! in_array($user->role, ['admin', 'superadmin'], true)) {
+            return response()->json(['status' => 'error', 'message' => 'Code invalide ou expiré.'], 422);
+        }
+
+        return $this->session($user);
+    }
+
+    private function session(User $user): JsonResponse
+    {
+        // Génération du Token avec capacités définies (Laravel Sanctum)
         $tokenCapabilities = $user->role === 'superadmin' ? ['*'] : ['gateways:read', 'transactions:manage'];
         $token = $user->createToken('digit_gateway_admin_token', $tokenCapabilities)->plainTextToken;
 
-        // 6. Réponse structurée consommée par notre interceptor Axios Next.js
+        // Réponse structurée consommée par notre interceptor Axios Next.js
         return response()->json([
             'status' => 'success',
             'token' => $token,
@@ -65,6 +101,7 @@ class SecurityController extends Controller
                 'name' => $user->name,
                 'phone' => $user->phone,
                 'role' => $user->role,
+                'two_factor_enabled' => $user->hasTwoFactorEnabled(),
             ],
         ], 200);
     }

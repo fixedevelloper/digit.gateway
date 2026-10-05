@@ -142,14 +142,17 @@ class AccessControlTest extends TestCase
         $this->postJson('/api/profile/update', ['name' => 'Nouveau nom', 'phone' => $user->phone])->assertStatus(200);
     }
 
-    public function test_only_a_superadmin_can_adjust_a_wallet(): void
+    public function test_a_plain_admin_can_only_request_an_adjustment_never_apply_it(): void
     {
         $target = User::factory()->create();
+        $target->wallet()->update(['balance' => 5000]);
         Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
 
         $this->postJson("/api/admin/wallets/{$target->wallet->id}/adjust", [
             'type' => 'credit', 'amount' => 1000, 'reason' => 'Test de régularisation',
-        ])->assertStatus(403);
+        ])->assertStatus(202)->assertJsonPath('status', 'pending_approval');
+
+        $this->assertSame(5000.0, (float) $target->wallet->fresh()->balance);
     }
 
     public function test_one_ip_cannot_spray_passwords_across_many_accounts(): void

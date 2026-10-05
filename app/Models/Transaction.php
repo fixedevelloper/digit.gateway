@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\ProcessingMode;
 use App\Enums\TransferService;
+use App\Services\Webhooks\WebhookDispatcher;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -42,6 +43,7 @@ class Transaction extends Model
         'status',
         'gateway_reference',
         'submitted_at',
+        'reconciliation_flagged_at',
         'failure_reason',
         'service',
         'processing_mode',
@@ -97,10 +99,22 @@ class Transaction extends Model
     {
         return [
             'submitted_at' => 'datetime',
+            'reconciliation_flagged_at' => 'datetime',
             'processed_at' => 'datetime',
             'service' => TransferService::class,
             'processing_mode' => ProcessingMode::class,
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Tout changement de statut d'une transaction du canal marchand est notifié à ses
+        // webhooks, quel que soit le chemin (webhook Digitwave, cron, agent, sandbox, admin).
+        static::updated(function (Transaction $transaction) {
+            if ($transaction->channel === 'merchant_api' && $transaction->wasChanged('status')) {
+                app(WebhookDispatcher::class)->transactionChanged($transaction);
+            }
+        });
     }
 
     public function isManual(): bool

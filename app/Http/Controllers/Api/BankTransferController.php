@@ -103,6 +103,7 @@ class BankTransferController extends Controller
         } catch (ValidationException $e) {
             return response()->json([
                 'status' => 'error',
+                'error_code' => $e instanceof \App\Exceptions\TransactionValidationException ? $e->errorCode : null,
                 'message' => collect($e->errors())->flatten()->first(),
             ], 400);
         } catch (\Exception $e) {

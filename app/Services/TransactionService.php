@@ -50,6 +50,7 @@ class TransactionService
         private readonly TransferAuditService $audit,
         private readonly FeeCalculator $fees,
         private readonly ManualBankTransferProvider $manualBank,
+        private readonly KycService $kyc,
     ) {
     }
 
@@ -359,6 +360,8 @@ class TransactionService
                 $this->assertWithinCountryLimits($decision->countryService, $user, $pricing['amount']);
             }
 
+            $this->kyc->assertWithinLimits($user, (float) $pricing['amount'], $environment);
+
             if ($wallet->{$balanceColumn} < $pricing['total']) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Insufficient fund/Balance.');
             }
@@ -502,6 +505,8 @@ class TransactionService
 
             ['decision' => $decision, 'destCurrency' => $destCurrency, 'rate' => $rate, 'converted' => $converted, 'fee' => $fee, 'total' => $total]
                 = $this->priceBankTransfer($user, $country, $walletCurrency, $amount, $sandbox);
+
+            $this->kyc->assertWithinLimits($user, $amount, $environment);
 
             if ((float) $wallet->{$balanceColumn} < $total) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Insufficient fund/Balance.');
@@ -689,6 +694,8 @@ class TransactionService
             $prepared = $this->prepare($user, $wallet->currency, $data, 'withdrawal');
             $pricing = $prepared['pricing'];
             $this->assertAutomaticRoute($prepared['operator'], $environment);
+
+            $this->kyc->assertWithinLimits($user, (float) $pricing['amount'], $environment);
 
             if ($wallet->{$balanceColumn} < $pricing['total']) {
                 throw TransactionValidationException::make('INSUFFICIENT_FUNDS', 'amount', 'Solde insuffisant pour effectuer ce retrait.');

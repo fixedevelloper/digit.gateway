@@ -12,9 +12,12 @@ use App\Policies\TransferPolicy;
 use App\Services\Gateways\DigitwaveGateway;
 use Dedoc\Scramble\Scramble;
 use Illuminate\Cache\RateLimiting\Limit;
+use App\Services\Monitoring\AlertService;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -47,6 +50,15 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perMinute(5)->by('account:'.$request->ip().'|'.$identifier),
                 Limit::perMinute(20)->by('ip:'.$request->ip()),
             ];
+        });
+
+        // Un job qui échoue définitivement (transfert, retrait, webhook...) alerte tout de suite,
+        // sans attendre le prochain passage du contrôle `monitor:check`.
+        Queue::failing(function (JobFailed $event) {
+            app(AlertService::class)->once(
+                'job_failed:'.$event->job->resolveName(),
+                "Job en échec : {$event->job->resolveName()} — ".mb_substr($event->exception->getMessage(), 0, 200),
+            );
         });
 
         Gate::policy(Transaction::class, TransferPolicy::class);

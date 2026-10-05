@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Merchant;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Wallet;
+use App\Services\Security\TwoFactorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -98,6 +99,36 @@ class AuthController extends Controller
             ], 403);
         }
 
+        if ($merchant->hasTwoFactorEnabled()) {
+            return response()->json([
+                'status' => 'two_factor_required',
+                'challenge' => app(TwoFactorService::class)->issueChallenge($merchant, 'merchant'),
+            ], 200);
+        }
+
+        return $this->session($merchant);
+    }
+
+    /** Seconde étape de connexion : POST /api/merchants/2fa */
+    public function twoFactor(Request $request, TwoFactorService $twoFactor): JsonResponse
+    {
+        $data = $request->validate([
+            'challenge' => 'required|string',
+            'code' => 'nullable|string|max:20',
+            'recovery_code' => 'nullable|string|max:20',
+        ]);
+
+        $merchant = $twoFactor->resolveChallenge($data['challenge'], 'merchant', $data['code'] ?? null, $data['recovery_code'] ?? null);
+
+        if (! $merchant || $merchant->role !== 'merchant') {
+            return response()->json(['status' => 'error', 'message' => 'Code invalide ou expiré.'], 422);
+        }
+
+        return $this->session($merchant);
+    }
+
+    private function session(User $merchant): JsonResponse
+    {
         $merchant->tokens()->delete();
         $token = $merchant->createToken('merchant_dashboard_token')->plainTextToken;
 
@@ -134,6 +165,7 @@ class AuthController extends Controller
             'phone' => $merchant->phone,
             'environment' => $merchant->environment,
             'status' => $merchant->status,
+            'two_factor_enabled' => $merchant->hasTwoFactorEnabled(),
             'created_at' => $merchant->created_at,
         ];
     }

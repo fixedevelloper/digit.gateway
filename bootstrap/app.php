@@ -35,6 +35,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'agent.role' => CheckAgentRole::class,
             'auth.apikey' => ApiKeyAuth::class,
             'idempotency.key' => IdempotencyKey::class,
+            'two_factor' => \App\Http\Middleware\RequireTwoFactor::class,
             'pin.verify' => VerifyTransactionPin::class,
             'idempotent' => PreventDuplicateRequest::class,
             'verify.digitwave.signature' => VerifyDigitwaveSignature::class,

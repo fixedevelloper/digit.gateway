@@ -11,6 +11,9 @@ use App\Http\Controllers\Api\Admin\CurrencyController;
 use App\Http\Controllers\Api\Admin\ExchangeRateController;
 use App\Http\Controllers\Api\Admin\MerchantController;
 use App\Http\Controllers\Api\Admin\OperatorController;
+use App\Http\Controllers\Api\Admin\KycController as AdminKycController;
+use App\Http\Controllers\Api\Admin\MonitoringController;
+use App\Http\Controllers\Api\Admin\ReconciliationController;
 use App\Http\Controllers\Api\Admin\TransactionController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Admin\WalletController;
@@ -19,7 +22,9 @@ use App\Http\Controllers\Api\Agent\TransferController as AgentTransferController
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BankTransferController;
 use App\Http\Controllers\Api\CountryController;
+use App\Http\Controllers\Api\KycController;
 use App\Http\Controllers\Api\Merchant\ApiKeyController;
+use App\Http\Controllers\Api\Merchant\WebhookController as MerchantWebhookController;
 use App\Http\Controllers\Api\Merchant\BankTransferController as MerchantBankTransferController;
 use App\Http\Controllers\Api\Merchant\AuthController as MerchantAuthController;
 use App\Http\Controllers\Api\Merchant\CountryController as MerchantCountryController;
@@ -30,6 +35,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PublicCoverageController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\SecurityController;
+use App\Http\Controllers\Api\TwoFactorController;
 use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UserTransferController;
@@ -104,6 +110,10 @@ $registerApiRoutes = function () {
         Route::get('/transfers/{transfer}', [UserTransferController::class, 'show'])->whereNumber('transfer');
         Route::post('/transfers/{transfer}/cancel', [UserTransferController::class, 'cancel'])->whereNumber('transfer');
 
+        // KYC : niveau, plafonds et dépôt des pièces justificatives
+        Route::get('/kyc', [KycController::class, 'show']);
+        Route::post('/kyc/submissions', [KycController::class, 'submit'])->middleware('throttle:5,60');
+
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
 
@@ -140,11 +150,19 @@ $registerApiRoutes = function () {
     // Connexion admin : forcément publique (pas encore de token à ce stade), mais regroupée
     // sous /admin/auth/* par cohérence avec le reste des routes d'administration.
     Route::middleware('throttle:auth')->post('/admin/auth/login', [SecurityController::class, 'login']);
+    Route::middleware('throttle:auth')->post('/admin/auth/2fa', [SecurityController::class, 'twoFactor']);
 
     Route::middleware(['auth:sanctum', 'active', 'admin.role'])->prefix('admin')->group(function () {
 
         // Déconnexion de la session admin
         Route::post('/auth/logout', [SecurityController::class, 'logout']);
+
+        // 2FA du compte admin
+        Route::get('/2fa', [TwoFactorController::class, 'status']);
+        Route::post('/2fa/setup', [TwoFactorController::class, 'setup'])->middleware('throttle:10,1');
+        Route::post('/2fa/confirm', [TwoFactorController::class, 'confirm'])->middleware('throttle:10,1');
+        Route::post('/2fa/disable', [TwoFactorController::class, 'disable'])->middleware('throttle:10,1');
+        Route::post('/2fa/recovery-codes', [TwoFactorController::class, 'regenerateRecoveryCodes'])->middleware('throttle:10,1');
 
         // Gestion des Opérateurs (Kill switch, modification des frais fixes & % )
         Route::get('/operators', [OperatorController::class, 'index']);
@@ -196,10 +214,30 @@ $registerApiRoutes = function () {
         // Gestion & Audit de la Masse Monétaire (Wallets)
         Route::get('/wallets', [WalletController::class, 'index']);
         // Mutation d'ajustement manuel : crée ou détruit de la monnaie, réservé au superadmin
-        Route::post('/wallets/{id}/adjust', [WalletController::class, 'adjust'])->middleware('admin.role:superadmin');
+        // Double validation : un admin demande, un AUTRE superadmin approuve (voir WalletAdjustmentService).
+        Route::post('/wallets/{id}/adjust', [WalletController::class, 'adjust'])->middleware('two_factor');
+        Route::get('/wallet-adjustments', [WalletController::class, 'pendingAdjustments']);
+        Route::post('/wallet-adjustments/{id}/approve', [WalletController::class, 'approveAdjustment'])
+            ->whereNumber('id')->middleware(['admin.role:superadmin', 'two_factor']);
+        Route::post('/wallet-adjustments/{id}/reject', [WalletController::class, 'rejectAdjustment'])
+            ->whereNumber('id')->middleware(['admin.role:superadmin', 'two_factor']);
         Route::get('/wallets/{id}/adjustments', [WalletController::class, 'adjustments']); // Historique des ajustements
 
         // Journal d'Audit Global (Transactions de la passerelle)
+        Route::get('/kyc/submissions', [AdminKycController::class, 'index']);
+        Route::get('/kyc/submissions/{id}', [AdminKycController::class, 'show'])->whereNumber('id');
+        Route::get('/kyc/submissions/{id}/files/{index}', [AdminKycController::class, 'file'])->whereNumber(['id', 'index']);
+        Route::post('/kyc/submissions/{id}/approve', [AdminKycController::class, 'approve'])->whereNumber('id');
+        Route::post('/kyc/submissions/{id}/reject', [AdminKycController::class, 'reject'])->whereNumber('id');
+        Route::get('/kyc/limits', [AdminKycController::class, 'limits']);
+        Route::put('/kyc/limits', [AdminKycController::class, 'updateLimits'])->middleware(['admin.role:superadmin', 'two_factor']);
+
+        Route::get('/monitoring', [MonitoringController::class, 'index']);
+
+        Route::get('/reconciliation', [ReconciliationController::class, 'index']);
+        Route::post('/reconciliation/{id}/resolve', [ReconciliationController::class, 'resolve'])
+            ->whereNumber('id')->middleware(['admin.role:superadmin', 'two_factor']);
+
         Route::get('/transactions', [TransactionController::class, 'index']);
         Route::get('/transactions/export/excel', [TransactionController::class, 'exportExcel']);
         Route::get('/transactions/export/pdf', [TransactionController::class, 'exportPdf']);
@@ -207,13 +245,13 @@ $registerApiRoutes = function () {
 
         // Gestion des Marchands B2B (intégrateurs de la passerelle)
         Route::get('/merchants', [MerchantController::class, 'index']);
-        Route::put('/merchants/{id}', [MerchantController::class, 'update']);
+        Route::put('/merchants/{id}', [MerchantController::class, 'update'])->middleware('two_factor');
 
         // Gestion des Utilisateurs (clients mobile money de l'app Flutter)
         Route::get('/users', [AdminUserController::class, 'index']);
         Route::put('/users/{id}', [AdminUserController::class, 'update']);
         // Réinitialisation manuelle : demande reçue par l'admin via WhatsApp
-        Route::post('/users/{id}/generate-password', [AdminUserController::class, 'generatePassword']);
+        Route::post('/users/{id}/generate-password', [AdminUserController::class, 'generatePassword'])->middleware('two_factor');
     });
 };
 
@@ -236,15 +274,32 @@ Route::prefix('merchants')->group(function () {
     Route::middleware('throttle:auth')->group(function () {
         Route::post('/register', [MerchantAuthController::class, 'register']);
         Route::post('/login', [MerchantAuthController::class, 'login']);
+        Route::post('/2fa', [MerchantAuthController::class, 'twoFactor']);
     });
 
     Route::middleware(['auth:sanctum', 'active', 'merchant.role'])->group(function () {
         Route::post('/logout', [MerchantAuthController::class, 'logout']);
         Route::get('/profile', [MerchantAuthController::class, 'profile']);
 
+        // 2FA du compte marchand
+        Route::get('/2fa', [TwoFactorController::class, 'status']);
+        Route::post('/2fa/setup', [TwoFactorController::class, 'setup'])->middleware('throttle:10,1');
+        Route::post('/2fa/confirm', [TwoFactorController::class, 'confirm'])->middleware('throttle:10,1');
+        Route::post('/2fa/disable', [TwoFactorController::class, 'disable'])->middleware('throttle:10,1');
+        Route::post('/2fa/recovery-codes', [TwoFactorController::class, 'regenerateRecoveryCodes'])->middleware('throttle:10,1');
+
         Route::get('/api-keys', [ApiKeyController::class, 'index']);
         Route::post('/api-keys', [ApiKeyController::class, 'store']);
         Route::delete('/api-keys/{id}', [ApiKeyController::class, 'destroy']);
+
+        // Webhooks sortants (notifications de changement de statut)
+        Route::get('/webhooks', [MerchantWebhookController::class, 'index']);
+        Route::post('/webhooks', [MerchantWebhookController::class, 'store']);
+        Route::put('/webhooks/{id}', [MerchantWebhookController::class, 'update']);
+        Route::delete('/webhooks/{id}', [MerchantWebhookController::class, 'destroy']);
+        Route::post('/webhooks/{id}/test', [MerchantWebhookController::class, 'test'])->middleware('throttle:10,1');
+        Route::get('/webhooks/{id}/deliveries', [MerchantWebhookController::class, 'deliveries']);
+        Route::post('/webhook-deliveries/{id}/redeliver', [MerchantWebhookController::class, 'redeliver'])->middleware('throttle:30,1');
 
         // Wallet et transactions du portail (live et sandbox)
         Route::get('/wallet', [MerchantPortalController::class, 'wallet']);
