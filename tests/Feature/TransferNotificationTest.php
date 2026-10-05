@@ -39,7 +39,8 @@ class TransferNotificationTest extends TestCase
 
     private function messages(): array
     {
-        return $this->customer->notifications()->oldest()->get()->pluck('data.event')->all();
+        // (created_at, id) : created_at n'a qu'une précision d'une seconde, l'id ordonné départage.
+        return $this->customer->notifications()->reorder()->orderBy('created_at')->orderBy('id')->get()->pluck('data.event')->all();
     }
 
     public function test_customer_is_notified_at_every_step_of_a_completed_transfer(): void
@@ -96,6 +97,22 @@ class TransferNotificationTest extends TestCase
 
         $this->postJson("/api/notifications/{$id}/read")->assertOk();
         $this->getJson('/api/notifications?unread=1')->assertJsonCount(0, 'data');
+    }
+
+    public function test_the_notifications_endpoint_lists_same_second_events_in_reverse_creation_order(): void
+    {
+        $t = $this->manualTransfer();
+        Sanctum::actingAs(User::factory()->agent()->create(), ['*']);
+        $this->postJson("/api/agent/transfers/{$t->id}/claim")->assertOk();
+        $this->postJson("/api/agent/transfers/{$t->id}/start")->assertOk();
+
+        // Même seconde pour tous : l'ordre ne dépend plus que de l'identifiant.
+        $this->customer->notifications()->update(['created_at' => now()->startOfSecond()]);
+
+        Sanctum::actingAs($this->customer, ['*']);
+        $events = collect($this->getJson('/api/notifications')->assertOk()->json('data'))->pluck('event')->all();
+
+        $this->assertSame(['TransferProcessing', 'TransferAssigned', 'TransferCreated'], $events);
     }
 
     public function test_notifications_are_private_to_their_owner(): void

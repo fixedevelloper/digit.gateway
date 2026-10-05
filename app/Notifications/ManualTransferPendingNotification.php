@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Models\Transaction;
+use App\Notifications\Concerns\HasOrderedId;
 use Illuminate\Notifications\Notification;
 
 /**
@@ -10,7 +11,12 @@ use Illuminate\Notifications\Notification;
  */
 class ManualTransferPendingNotification extends Notification
 {
-    public function __construct(private readonly Transaction $transfer) {}
+    use HasOrderedId;
+
+    public function __construct(private readonly Transaction $transfer)
+    {
+        $this->useOrderedId();
+    }
 
     public function via(object $notifiable): array
     {

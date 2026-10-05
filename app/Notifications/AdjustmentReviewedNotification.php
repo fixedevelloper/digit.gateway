@@ -3,12 +3,18 @@
 namespace App\Notifications;
 
 use App\Models\WalletAdjustment;
+use App\Notifications\Concerns\HasOrderedId;
 use Illuminate\Notifications\Notification;
 
 /** Informe le demandeur du résultat de sa demande d'ajustement. */
 class AdjustmentReviewedNotification extends Notification
 {
-    public function __construct(private readonly WalletAdjustment $adjustment) {}
+    use HasOrderedId;
+
+    public function __construct(private readonly WalletAdjustment $adjustment)
+    {
+        $this->useOrderedId();
+    }
 
     public function via(object $notifiable): array
     {

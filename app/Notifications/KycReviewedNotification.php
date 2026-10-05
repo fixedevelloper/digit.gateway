@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Models\KycSubmission;
+use App\Notifications\Concerns\HasOrderedId;
 use Illuminate\Notifications\Notification;
 
 /**
@@ -10,7 +11,12 @@ use Illuminate\Notifications\Notification;
  */
 class KycReviewedNotification extends Notification
 {
-    public function __construct(private readonly KycSubmission $submission) {}
+    use HasOrderedId;
+
+    public function __construct(private readonly KycSubmission $submission)
+    {
+        $this->useOrderedId();
+    }
 
     public function via(object $notifiable): array
     {

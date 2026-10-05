@@ -3,12 +3,18 @@
 namespace App\Notifications;
 
 use App\Models\WalletAdjustment;
+use App\Notifications\Concerns\HasOrderedId;
 use Illuminate\Notifications\Notification;
 
 /** Prévient les superadmins qu'un ajustement de wallet attend leur validation. */
 class AdjustmentPendingNotification extends Notification
 {
-    public function __construct(private readonly WalletAdjustment $adjustment) {}
+    use HasOrderedId;
+
+    public function __construct(private readonly WalletAdjustment $adjustment)
+    {
+        $this->useOrderedId();
+    }
 
     public function via(object $notifiable): array
     {

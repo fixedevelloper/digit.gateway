@@ -304,7 +304,9 @@ class TransactionService
             'recipient_operator' => $operator->code,
             'operator_id' => $operator->id,
             'quote_id' => $quote?->id,
-            'country_name' => $data['country'] ?? $operator->country->name,
+            // Toujours le nom canonique du pays : c'est ce qui est envoyé au fournisseur de paiement, alors que
+            // l'appelant peut avoir fourni le code ISO (ex: « CM » au lieu de « Cameroon »).
+            'country_name' => $operator->country->name,
             'amount_sent' => $pricing['amount'],
             'currency_sent' => $pricing['currency'],
             'fees' => $pricing['fee'],

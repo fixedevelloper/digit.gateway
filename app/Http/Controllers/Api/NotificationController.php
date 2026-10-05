@@ -17,7 +17,9 @@ class NotificationController extends Controller
             ? $request->user()->unreadNotifications()
             : $request->user()->notifications();
 
-        $page = $query->paginate(20);
+        // created_at n'a qu'une précision d'une seconde : l'id (UUID ordonné, voir HasOrderedId) départage
+        // les notifications créées dans la même seconde.
+        $page = $query->reorder()->orderByDesc('created_at')->orderByDesc('id')->paginate(20);
 
         return response()->json([
             'status' => 'success',

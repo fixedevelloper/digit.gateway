@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Events\TransferEvent;
+use App\Notifications\Concerns\HasOrderedId;
 use Illuminate\Notifications\Notification;
 
 /**
@@ -11,7 +12,12 @@ use Illuminate\Notifications\Notification;
  */
 class TransferStatusNotification extends Notification
 {
-    public function __construct(private readonly TransferEvent $event) {}
+    use HasOrderedId;
+
+    public function __construct(private readonly TransferEvent $event)
+    {
+        $this->useOrderedId();
+    }
 
     public function via(object $notifiable): array
     {

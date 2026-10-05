@@ -2,6 +2,7 @@
 
 namespace App\Notifications;
 
+use App\Notifications\Concerns\HasOrderedId;
 use Illuminate\Notifications\Notification;
 
 /**
@@ -9,7 +10,12 @@ use Illuminate\Notifications\Notification;
  */
 class ReconciliationRequiredNotification extends Notification
 {
-    public function __construct(private readonly int $count, private readonly array $references) {}
+    use HasOrderedId;
+
+    public function __construct(private readonly int $count, private readonly array $references)
+    {
+        $this->useOrderedId();
+    }
 
     public function via(object $notifiable): array
     {
