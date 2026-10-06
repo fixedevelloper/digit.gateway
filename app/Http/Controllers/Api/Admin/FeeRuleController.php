@@ -13,7 +13,8 @@ use Illuminate\Validation\Rule;
 
 /**
  * Règles de frais par pays, service, provider, devise et tranche de montant
- * (cf. FeeCalculator). Une règle se désactive (`active=false`) plutôt que d'être supprimée.
+ * (cf. FeeCalculator). Une règle peut être désactivée (`active=false`, réversible) ou supprimée :
+ * les transactions existantes conservent les frais qu'elles ont déjà enregistrés.
  */
 class FeeRuleController extends Controller
 {
@@ -45,6 +46,15 @@ class FeeRuleController extends Controller
         $rule->update($this->validated($request, sometimes: true));
 
         return response()->json(['status' => 'success', 'data' => $rule->fresh()]);
+    }
+
+    public function destroy(string $id): JsonResponse
+    {
+        Gate::authorize('manage', Country::class);
+
+        FeeRule::findOrFail($id)->delete();
+
+        return response()->json(['status' => 'success', 'message' => 'Règle de frais supprimée.']);
     }
 
     private function validated(Request $request, bool $sometimes = false): array

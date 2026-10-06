@@ -55,12 +55,14 @@ class AdminTransferConfigurationTest extends TestCase
             $this->getJson('/api/admin/providers')->assertForbidden();
             $this->postJson('/api/admin/providers', ['code' => 'x', 'name' => 'x'])->assertForbidden();
             $this->putJson("/api/admin/providers/{$provider->id}", ['active' => false])->assertForbidden();
+            $this->deleteJson("/api/admin/providers/{$provider->id}")->assertForbidden();
             $this->postJson('/api/admin/countries', ['name' => 'Z'])->assertForbidden();
             $this->putJson("/api/admin/countries/{$country->id}", ['status' => false])->assertForbidden();
             $this->postJson('/api/admin/country-services', [])->assertForbidden();
             $this->putJson("/api/admin/country-services/{$service->id}", ['status' => 'INACTIVE'])->assertForbidden();
             $this->postJson('/api/admin/fee-rules', [])->assertForbidden();
             $this->putJson("/api/admin/fee-rules/{$fee->id}", ['fixed_fee' => 0])->assertForbidden();
+            $this->deleteJson("/api/admin/fee-rules/{$fee->id}")->assertForbidden();
             $this->putJson("/api/admin/countries/{$country->id}/bank-fields", ['fields' => []])->assertForbidden();
             $this->postJson('/api/admin/agents', [])->assertForbidden();
             $this->getJson('/api/admin/transfers')->assertForbidden();
@@ -68,8 +70,104 @@ class AdminTransferConfigurationTest extends TestCase
         }
 
         $this->assertTrue($provider->fresh()->active);
+        $this->assertNotNull(Provider::find($provider->id));
         $this->assertSame('ACTIVE', $service->fresh()->status->value);
         $this->assertEquals(1, (float) $fee->fresh()->fixed_fee);
+        $this->assertNotNull(FeeRule::find($fee->id));
+    }
+
+    public function test_a_fee_rule_can_be_edited_cleared_and_deleted(): void
+    {
+        $this->admin();
+        $country = Country::factory()->create();
+        $rule = FeeRule::create(['country_id' => $country->id, 'service' => 'BANK_TRANSFER', 'currency' => 'XAF', 'min_amount' => 0, 'max_amount' => 1000, 'fixed_fee' => 100, 'percent_fee' => 0.01]);
+
+        // Modification complète : pays « tous », tranche ouverte, nouveaux frais.
+        $this->putJson("/api/admin/fee-rules/{$rule->id}", [
+            'country_id' => null, 'service' => 'MOBILE_MONEY', 'provider_id' => null, 'currency' => 'eur',
+            'min_amount' => 50, 'max_amount' => null, 'fixed_fee' => 250, 'percent_fee' => 0.025,
+        ])->assertOk()->assertJsonPath('data.currency', 'EUR')->assertJsonPath('data.service', 'MOBILE_MONEY');
+
+        $fresh = $rule->fresh();
+        $this->assertNull($fresh->country_id);
+        $this->assertNull($fresh->max_amount);
+        $this->assertEquals(250, (float) $fresh->fixed_fee);
+        $this->assertEquals(0.025, (float) $fresh->percent_fee);
+
+        // Validation à la modification.
+        $this->putJson("/api/admin/fee-rules/{$rule->id}", ['min_amount' => 500, 'max_amount' => 100])->assertStatus(422)->assertJsonValidationErrors('max_amount');
+        $this->putJson("/api/admin/fee-rules/{$rule->id}", ['percent_fee' => 2])->assertStatus(422);
+        $this->putJson('/api/admin/fee-rules/999999', ['fixed_fee' => 1])->assertNotFound();
+
+        // Suppression : définitive, et sans effet sur les autres règles.
+        $other = FeeRule::create(['service' => 'MOBILE_MONEY', 'currency' => 'XAF', 'fixed_fee' => 1]);
+        $this->deleteJson("/api/admin/fee-rules/{$rule->id}")->assertOk()->assertJsonPath('status', 'success');
+        $this->assertNull(FeeRule::find($rule->id));
+        $this->assertNotNull(FeeRule::find($other->id));
+        $this->deleteJson("/api/admin/fee-rules/{$rule->id}")->assertNotFound();
+        $this->getJson('/api/admin/fee-rules')->assertOk()->assertJsonCount(1);
+    }
+
+    public function test_a_provider_can_be_edited_but_its_code_never_changes(): void
+    {
+        $this->admin();
+        $provider = Provider::factory()->create(['code' => 'bankx', 'name' => 'Bank X', 'services' => ['MOBILE_MONEY']]);
+
+        $this->putJson("/api/admin/providers/{$provider->id}", ['name' => 'Bank X Pro', 'services' => ['MOBILE_MONEY', 'BANK_TRANSFER'], 'code' => 'hacked'])
+            ->assertOk()->assertJsonPath('data.name', 'Bank X Pro')->assertJsonPath('data.code', 'bankx');
+
+        $this->assertSame(['MOBILE_MONEY', 'BANK_TRANSFER'], $provider->fresh()->services);
+        $this->putJson("/api/admin/providers/{$provider->id}", ['services' => ['TELEPORT']])->assertStatus(422);
+        $this->putJson("/api/admin/providers/{$provider->id}", ['name' => ''])->assertStatus(422);
+    }
+
+    public function test_an_unused_provider_can_be_deleted(): void
+    {
+        $this->admin();
+        $unused = Provider::factory()->create(['code' => 'bankx']);
+
+        $this->deleteJson("/api/admin/providers/{$unused->id}")->assertOk()->assertJsonPath('status', 'success');
+        $this->assertNull(Provider::find($unused->id));
+        $this->deleteJson("/api/admin/providers/{$unused->id}")->assertNotFound();
+    }
+
+    public function test_a_provider_in_use_cannot_be_deleted_and_nothing_cascades(): void
+    {
+        $this->admin();
+        $country = Country::factory()->create();
+        $provider = Provider::factory()->create(['code' => 'bankx', 'name' => 'Bank X']);
+        $service = CountryService::factory()->create(['country_id' => $country->id, 'provider_id' => $provider->id]);
+        $fee = FeeRule::create(['service' => 'MOBILE_MONEY', 'provider_id' => $provider->id, 'currency' => 'XAF', 'fixed_fee' => 1]);
+
+        $res = $this->deleteJson("/api/admin/providers/{$provider->id}")->assertStatus(409)->assertJsonPath('error_code', 'PROVIDER_IN_USE');
+        $this->assertStringContainsString('1 corridor(s)', $res->json('message'));
+        $this->assertStringContainsString('1 règle(s) de frais', $res->json('message'));
+
+        // Ni le corridor ni la règle de frais (cascade en base) n'ont été touchés.
+        $this->assertNotNull(Provider::find($provider->id));
+        $this->assertSame($provider->id, $service->fresh()->provider_id);
+        $this->assertNotNull(FeeRule::find($fee->id));
+
+        // Un historique de transactions suffit aussi à bloquer la suppression.
+        $other = Provider::factory()->create(['code' => 'bank-y']);
+        $user = User::factory()->create();
+        Transaction::create([
+            'reference' => 'TX-P', 'type' => 'transfer', 'user_id' => $user->id, 'recipient_phone' => '1', 'recipient_operator' => 'X',
+            'country_name' => 'X', 'amount_sent' => 1, 'currency_sent' => 'XAF', 'fees' => 0, 'amount_to_receive' => 1,
+            'currency_received' => 'XAF', 'status' => 'success', 'provider_id' => $other->id,
+        ]);
+        $this->assertStringContainsString('1 transaction(s)', $this->deleteJson("/api/admin/providers/{$other->id}")->assertStatus(409)->json('message'));
+    }
+
+    public function test_the_default_mobile_money_provider_cannot_be_deleted_only_deactivated(): void
+    {
+        $this->admin();
+        $default = Provider::factory()->create(['code' => config('transfers.default_mobile_money_provider')]);
+
+        $this->deleteJson("/api/admin/providers/{$default->id}")->assertStatus(409)->assertJsonPath('error_code', 'PROVIDER_IS_DEFAULT');
+        $this->assertNotNull(Provider::find($default->id));
+
+        $this->putJson("/api/admin/providers/{$default->id}", ['active' => false])->assertOk()->assertJsonPath('data.active', false);
     }
 
     public function test_country_service_configuration_and_validation(): void

@@ -23,7 +23,8 @@ class MerchantController extends Controller
         $merchants = User::where('role', 'merchant')
             ->with('wallet:id,user_id,balance,currency')
             ->orderBy('company_name')
-            ->get(['id', 'name', 'email', 'phone', 'company_name', 'environment', 'status', 'created_at']);
+            ->withCount('merchantDocuments')
+            ->get(['id', 'name', 'email', 'phone', 'company_name', 'environment', 'status', 'kyb_status', 'kyb_grace_until', 'created_at']);
 
         return response()->json($merchants, 200);
     }
@@ -43,6 +44,16 @@ class MerchantController extends Controller
             'environment' => 'sometimes|in:sandbox,production',
             'status' => 'sometimes|boolean',
         ]);
+
+        // Passage en production : uniquement pour un dossier de vérification (KYB) approuvé.
+        // Un marchand déjà en production n'est pas concerné (ni rétrogradé, ni bloqué pour autre chose).
+        if (($validated['environment'] ?? null) === 'production' && $merchant->environment !== 'production' && $merchant->kyb_status !== 'approved') {
+            return response()->json([
+                'status' => 'error',
+                'error_code' => 'KYB_REQUIRED',
+                'message' => 'Le dossier de vérification de ce marchand n\'est pas approuvé : le passage en production est refusé.',
+            ], 422);
+        }
 
         $merchant->update($validated);
 

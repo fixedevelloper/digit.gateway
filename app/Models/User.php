@@ -37,6 +37,8 @@ class User extends Authenticatable
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'encrypted:array',
             'two_factor_confirmed_at' => 'datetime',
+            'kyb_grace_until' => 'datetime',
+            'kyb_reviewed_at' => 'datetime',
         ];
     }
 
@@ -127,5 +129,15 @@ class User extends Authenticatable
     public function webhookEndpoints(): HasMany
     {
         return $this->hasMany(WebhookEndpoint::class);
+    }
+
+    public function merchantProfile(): HasOne
+    {
+        return $this->hasOne(MerchantProfile::class);
+    }
+
+    public function merchantDocuments(): HasMany
+    {
+        return $this->hasMany(MerchantDocument::class);
     }
 }

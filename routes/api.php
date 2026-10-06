@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Admin\ExchangeRateController;
 use App\Http\Controllers\Api\Admin\MerchantController;
 use App\Http\Controllers\Api\Admin\OperatorController;
 use App\Http\Controllers\Api\Admin\KycController as AdminKycController;
+use App\Http\Controllers\Api\Admin\MerchantKybController;
 use App\Http\Controllers\Api\Admin\MonitoringController;
 use App\Http\Controllers\Api\Admin\ReconciliationController;
 use App\Http\Controllers\Api\Admin\TransactionController;
@@ -24,6 +25,7 @@ use App\Http\Controllers\Api\BankTransferController;
 use App\Http\Controllers\Api\CountryController;
 use App\Http\Controllers\Api\KycController;
 use App\Http\Controllers\Api\Merchant\ApiKeyController;
+use App\Http\Controllers\Api\Merchant\KybController as MerchantKybPortalController;
 use App\Http\Controllers\Api\Merchant\WebhookController as MerchantWebhookController;
 use App\Http\Controllers\Api\Merchant\BankTransferController as MerchantBankTransferController;
 use App\Http\Controllers\Api\Merchant\AuthController as MerchantAuthController;
@@ -168,6 +170,7 @@ $registerApiRoutes = function () {
         Route::get('/operators', [OperatorController::class, 'index']);
         Route::post('/operators', [OperatorController::class, 'store']);
         Route::put('/operators/{id}', [OperatorController::class, 'update']);
+        Route::delete('/operators/{id}', [OperatorController::class, 'destroy']);
 
         // Taux de change manuels (ajout seul : chaque modification crée une nouvelle ligne)
         Route::get('/exchange-rates', [ExchangeRateController::class, 'index']);
@@ -183,11 +186,13 @@ $registerApiRoutes = function () {
         Route::get('/countries', [App\Http\Controllers\Api\Admin\CountryController::class, 'index']);
         Route::post('/countries', [App\Http\Controllers\Api\Admin\CountryController::class, 'store']);
         Route::put('/countries/{id}', [App\Http\Controllers\Api\Admin\CountryController::class, 'update']);
+        Route::delete('/countries/{id}', [App\Http\Controllers\Api\Admin\CountryController::class, 'destroy']);
 
         // Providers, services par pays (Mobile Money / virement bancaire), frais et champs bancaires
         Route::get('/providers', [ProviderController::class, 'index']);
         Route::post('/providers', [ProviderController::class, 'store']);
         Route::put('/providers/{id}', [ProviderController::class, 'update']);
+        Route::delete('/providers/{id}', [ProviderController::class, 'destroy']);
 
         Route::get('/country-services', [CountryServiceController::class, 'index']);
         Route::post('/country-services', [CountryServiceController::class, 'store']);
@@ -197,6 +202,7 @@ $registerApiRoutes = function () {
         Route::get('/fee-rules', [FeeRuleController::class, 'index']);
         Route::post('/fee-rules', [FeeRuleController::class, 'store']);
         Route::put('/fee-rules/{id}', [FeeRuleController::class, 'update']);
+        Route::delete('/fee-rules/{id}', [FeeRuleController::class, 'destroy']);
 
         Route::get('/countries/{id}/bank-fields', [BankFieldRuleController::class, 'show']);
         Route::put('/countries/{id}/bank-fields', [BankFieldRuleController::class, 'update']);
@@ -247,6 +253,15 @@ $registerApiRoutes = function () {
         Route::get('/merchants', [MerchantController::class, 'index']);
         Route::put('/merchants/{id}', [MerchantController::class, 'update'])->middleware('two_factor');
 
+        // Dossier de vérification (KYB) des marchands
+        Route::get('/merchants/{id}/kyb', [MerchantKybController::class, 'show'])->whereNumber('id');
+        Route::get('/merchants/{id}/kyb/documents/{documentId}/file', [MerchantKybController::class, 'file'])->whereNumber(['id', 'documentId'])->middleware('throttle:60,1');
+        Route::post('/merchants/{id}/kyb/documents/{documentId}/approve', [MerchantKybController::class, 'approveDocument'])->whereNumber(['id', 'documentId']);
+        Route::post('/merchants/{id}/kyb/documents/{documentId}/reject', [MerchantKybController::class, 'rejectDocument'])->whereNumber(['id', 'documentId']);
+        // Décision finale : superadmin + 2FA (elle débloque le passage en production).
+        Route::post('/merchants/{id}/kyb/approve', [MerchantKybController::class, 'approve'])->whereNumber('id')->middleware(['admin.role:superadmin', 'two_factor']);
+        Route::post('/merchants/{id}/kyb/reject', [MerchantKybController::class, 'reject'])->whereNumber('id')->middleware(['admin.role:superadmin', 'two_factor']);
+
         // Gestion des Utilisateurs (clients mobile money de l'app Flutter)
         Route::get('/users', [AdminUserController::class, 'index']);
         Route::put('/users/{id}', [AdminUserController::class, 'update']);
@@ -291,6 +306,13 @@ Route::prefix('merchants')->group(function () {
         Route::get('/api-keys', [ApiKeyController::class, 'index']);
         Route::post('/api-keys', [ApiKeyController::class, 'store']);
         Route::delete('/api-keys/{id}', [ApiKeyController::class, 'destroy']);
+
+        // Dossier de vérification de l'entreprise (KYB), requis pour passer en production
+        Route::get('/kyb', [MerchantKybPortalController::class, 'show']);
+        Route::put('/kyb/profile', [MerchantKybPortalController::class, 'saveProfile']);
+        Route::post('/kyb/documents', [MerchantKybPortalController::class, 'upload'])->middleware('throttle:30,60');
+        Route::get('/kyb/documents/{id}/file', [MerchantKybPortalController::class, 'file'])->whereNumber('id');
+        Route::post('/kyb/submit', [MerchantKybPortalController::class, 'submit'])->middleware('throttle:10,60');
 
         // Webhooks sortants (notifications de changement de statut)
         Route::get('/webhooks', [MerchantWebhookController::class, 'index']);

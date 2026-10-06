@@ -3,7 +3,12 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\BankBeneficiary;
 use App\Models\Country;
+use App\Models\CountryService;
+use App\Models\FeeRule;
+use App\Models\Operator;
+use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -38,10 +43,12 @@ class CountryController extends Controller
      */
     public function store(Request $request)
     {
+        $this->normalizeCodes($request);
+
         $validatedData = $request->validate([
             'name' => 'required|string|max:100|unique:countries,name',
-            'iso' => 'required|string|max:2|unique:countries,iso',
-            'iso3' => 'required|string|max:3|unique:countries,iso3',
+            'iso' => 'required|string|size:2|unique:countries,iso',
+            'iso3' => 'required|string|size:3|unique:countries,iso3',
             'phonecode' => 'required|string|max:10',
             'currency' => 'required|string|max:10',
             // Pas de règle 'image' : elle rejette catégoriquement les SVG (protection XSS
@@ -78,6 +85,8 @@ class CountryController extends Controller
     {
         $country = Country::findOrFail($id);
 
+        $this->normalizeCodes($request);
+
         // Un envoi via FormData transmet "" plutôt que null quand le select est vidé
         if ($request->has('forced_operator_id') && $request->input('forced_operator_id') === '') {
             $request->merge(['forced_operator_id' => null]);
@@ -86,8 +95,8 @@ class CountryController extends Controller
         // Validation des paramètres selon la structure de ta table
         $validatedData = $request->validate([
             'name' => 'sometimes|string|max:100|unique:countries,name,'.$id,
-            'iso' => 'sometimes|string|max:2|unique:countries,iso,'.$id,
-            'iso3' => 'sometimes|string|max:3|unique:countries,iso3,'.$id,
+            'iso' => 'sometimes|string|size:2|unique:countries,iso,'.$id,
+            'iso3' => 'sometimes|string|size:3|unique:countries,iso3,'.$id,
             'status' => 'sometimes|boolean',
             'phonecode' => 'sometimes|string|max:10',
             'currency' => 'sometimes|string|max:10',
@@ -124,5 +133,55 @@ class CountryController extends Controller
             'message' => "Le corridor {$country->name} a été mis à jour avec succès.",
             'data' => $country,
         ], 200);
+    }
+
+    /**
+     * Supprime un pays. Refusé tant qu'il sert : la base supprimerait en cascade ses opérateurs, services et règles
+     * de frais (et bloquerait sur les bénéficiaires), et l'historique perdrait son pays. Pour fermer un corridor,
+     * on le suspend. Les règles de champs bancaires, propres au pays, partent avec lui.
+     */
+    public function destroy(string $id)
+    {
+        $country = Country::findOrFail($id);
+
+        $usage = array_filter([
+            'opérateur(s)' => Operator::where('country_id', $country->id)->count(),
+            'service(s) configuré(s)' => CountryService::where('country_id', $country->id)->count(),
+            'règle(s) de frais' => FeeRule::where('country_id', $country->id)->count(),
+            'bénéficiaire(s) bancaire(s)' => BankBeneficiary::where('country_id', $country->id)->count(),
+            'transaction(s)' => Transaction::where('destination_country_id', $country->id)->orWhere('country_name', $country->name)->count(),
+        ]);
+
+        if ($usage) {
+            $detail = collect($usage)->map(fn ($n, $label) => "{$n} {$label}")->implode(', ');
+
+            return response()->json([
+                'status' => 'error',
+                'error_code' => 'COUNTRY_IN_USE',
+                'message' => "« {$country->name} » est encore utilisé ({$detail}) : suspendez le corridor plutôt que de le supprimer.",
+            ], 409);
+        }
+
+        if ($country->flag) {
+            Storage::disk('public')->delete($country->flag);
+        }
+
+        $country->delete();
+
+        return response()->json(['status' => 'success', 'message' => "Le corridor {$country->name} a été supprimé."]);
+    }
+
+    /**
+     * Les codes sont toujours stockés en majuscules : les recherches (Country::resolveActive, API marchande)
+     * comparent avec strtoupper(), un « cm » minuscule ne serait jamais retrouvé. Fait AVANT la validation
+     * pour que l'unicité se vérifie sur la valeur normalisée.
+     */
+    private function normalizeCodes(Request $request): void
+    {
+        foreach (['iso', 'iso3', 'currency'] as $field) {
+            if ($request->has($field)) {
+                $request->merge([$field => strtoupper(trim((string) $request->input($field)))]);
+            }
+        }
     }
 }

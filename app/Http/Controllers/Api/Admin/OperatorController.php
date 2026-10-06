@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Country;
 use App\Models\Operator;
+use App\Models\Transaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -94,6 +96,10 @@ class OperatorController extends Controller
     {
         $operator = Operator::findOrFail($id);
 
+        if ($blocked = $this->refuseIdentityChangeWhenUsed($request, $operator)) {
+            return $blocked;
+        }
+
         if ($request->has('currency')) {
             $request->merge(['currency' => strtoupper((string) $request->input('currency'))]);
         }
@@ -150,5 +156,74 @@ class OperatorController extends Controller
             'message' => "Configuration de la passerelle {$operator->name} mise à jour avec succès.",
             'data' => $operator,
         ], 200);
+    }
+
+    /**
+     * Supprime un opérateur. Refusé tant que son historique de transactions existe, ou qu'il est l'opérateur
+     * forcé d'un pays : les transactions perdraient leur lien (operator_id → null) et le routage d'urgence
+     * d'un pays pointerait dans le vide. Pour le couper, on le désactive (« Coupé »). Ses cotations en attente
+     * (éphémères) disparaissent avec lui.
+     */
+    public function destroy(string $id)
+    {
+        $operator = Operator::with('country')->findOrFail($id);
+
+        $usage = array_filter([
+            'transaction(s)' => $this->transactionsOf($operator)->count(),
+            'pays où il est forcé' => Country::where('forced_operator_id', $operator->id)->count(),
+        ]);
+
+        if ($usage) {
+            $detail = collect($usage)->map(fn ($n, $label) => "{$n} {$label}")->implode(', ');
+
+            return response()->json([
+                'status' => 'error',
+                'error_code' => 'OPERATOR_IN_USE',
+                'message' => "« {$operator->name} » est encore utilisé ({$detail}) : coupez-le (désactivez-le) plutôt que de le supprimer.",
+            ], 409);
+        }
+
+        if ($operator->logo && ! filter_var($operator->logo, FILTER_VALIDATE_URL)) {
+            Storage::disk('public')->delete($operator->logo);
+        }
+
+        $operator->delete();
+
+        return response()->json(['status' => 'success', 'message' => "L'opérateur {$operator->name} a été supprimé."]);
+    }
+
+    /** Transactions rattachées à l'opérateur (par id, ou par code + pays pour les plus anciennes). */
+    private function transactionsOf(Operator $operator)
+    {
+        return Transaction::where('operator_id', $operator->id)
+            ->orWhere(fn ($q) => $q->where('recipient_operator', $operator->code)->where('country_name', $operator->country?->name));
+    }
+
+    /**
+     * Code, pays et devise identifient l'opérateur dans l'historique (`recipient_operator`) et les corridors :
+     * on ne les modifie plus dès qu'il a servi. Le nom, les frais, les bornes, le logo et le statut restent libres.
+     */
+    private function refuseIdentityChangeWhenUsed(Request $request, Operator $operator)
+    {
+        $changes = array_filter([
+            'code' => $request->has('code') && (string) $request->input('code') !== $operator->code,
+            'country_id' => $request->has('country_id') && (int) $request->input('country_id') !== (int) $operator->country_id,
+            'currency' => $request->has('currency') && strtoupper((string) $request->input('currency')) !== $operator->currency,
+        ]);
+
+        if (! $changes) {
+            return null;
+        }
+
+        $operator->loadMissing('country');
+
+        if ($this->transactionsOf($operator)->doesntExist()) {
+            return null;
+        }
+
+        return response()->json([
+            'message' => 'Cet opérateur a déjà des transactions : son code, son pays et sa devise ne peuvent plus être modifiés (créez un nouvel opérateur, et coupez celui-ci).',
+            'errors' => collect($changes)->map(fn () => ['Modification impossible : opérateur déjà utilisé.'])->all(),
+        ], 422);
     }
 }

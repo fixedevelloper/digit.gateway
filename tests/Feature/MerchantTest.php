@@ -59,6 +59,8 @@ class MerchantTest extends TestCase
         Sanctum::actingAs($admin, ['*']);
 
         $merchant = User::factory()->merchant()->create(['environment' => 'sandbox']);
+        // Le passage en production exige un dossier de vérification (KYB) approuvé : voir MerchantKybTest.
+        $merchant->forceFill(['kyb_status' => 'approved'])->save();
 
         $response = $this->putJson('/api/admin/merchants/'.$merchant->id, ['environment' => 'production']);
 
