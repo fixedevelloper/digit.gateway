@@ -252,6 +252,8 @@ $registerApiRoutes = function () {
         // Gestion des Marchands B2B (intégrateurs de la passerelle)
         Route::get('/merchants', [MerchantController::class, 'index']);
         Route::put('/merchants/{id}', [MerchantController::class, 'update'])->middleware('two_factor');
+        Route::get('/merchants/{id}/transactions', [MerchantController::class, 'transactions'])->whereNumber('id');
+        Route::get('/merchants/{id}/transactions/export', [MerchantController::class, 'exportTransactions'])->whereNumber('id')->middleware('throttle:10,1');
 
         // Dossier de vérification (KYB) des marchands
         Route::get('/merchants/{id}/kyb', [MerchantKybController::class, 'show'])->whereNumber('id');
