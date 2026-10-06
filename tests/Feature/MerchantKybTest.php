@@ -268,6 +268,73 @@ class MerchantKybTest extends TestCase
         $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/approve")->assertStatus(409);
     }
 
+    public function test_documents_can_be_reviewed_and_the_dossier_approved_without_waiting_for_the_submission(): void
+    {
+        // Dossier « incomplet » : le marchand a tout déposé mais n'a pas cliqué sur « Soumettre ».
+        $merchant = $this->merchant();
+        $this->completeDossier($merchant);
+        $this->assertSame('incomplete', $merchant->fresh()->kyb_status);
+        $admin = User::factory()->superadmin()->create();
+        Sanctum::actingAs($admin, ['*']);
+
+        // Avant validation, l'équipe voit précisément ce qui bloque.
+        $overview = $this->getJson("/api/admin/merchants/{$merchant->id}/kyb")->assertOk()->assertJsonPath('data.submitted', false);
+        $this->assertContains('Pièce à valider : Registre de commerce / immatriculation', $overview->json('data.blockers'));
+        $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/approve")->assertStatus(409);
+
+        foreach ($merchant->merchantDocuments as $doc) {
+            $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/documents/{$doc->id}/approve")->assertOk();
+        }
+
+        $this->getJson("/api/admin/merchants/{$merchant->id}/kyb")->assertJsonPath('data.blockers', []);
+        $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/approve")->assertOk();
+        $this->assertSame('approved', $merchant->fresh()->kyb_status);
+    }
+
+    public function test_the_blockers_list_missing_expired_rejected_and_profile_problems(): void
+    {
+        $merchant = $this->merchant();
+        $this->upload($merchant, 'tax_certificate');
+        $this->upload($merchant, 'legal_rep_id', null, ['expires_at' => now()->addDay()->toDateString()]);
+        $merchant->merchantDocuments()->where('type', 'legal_rep_id')->update(['expires_at' => now()->subDay()]);
+        $merchant->merchantDocuments()->where('type', 'tax_certificate')->update(['status' => 'rejected', 'rejection_reason' => 'flou']);
+        Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
+
+        $blockers = $this->getJson("/api/admin/merchants/{$merchant->id}/kyb")->json('data.blockers');
+
+        $this->assertContains('Informations d\'entreprise non renseignées ou incomplètes', $blockers);
+        $this->assertContains('Pièce manquante : Statuts de la société', $blockers);
+        $this->assertContains('Pièce expirée : Pièce d\'identité du représentant légal', $blockers);
+        $this->assertContains('Pièce refusée : Attestation d\'identifiant fiscal (NIF / NIU)', $blockers);
+    }
+
+    public function test_a_document_rejected_before_submission_keeps_the_dossier_incomplete_and_notifies(): void
+    {
+        $merchant = $this->merchant();
+        $this->completeDossier($merchant);
+        $doc = $merchant->merchantDocuments()->where('type', 'address_proof')->firstOrFail();
+        Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
+
+        $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/documents/{$doc->id}/reject", ['reason' => 'Facture trop ancienne'])->assertOk();
+
+        $this->assertSame('incomplete', $merchant->fresh()->kyb_status);
+        $this->assertSame(1, $merchant->notifications()->where('type', KybReviewedNotification::class)->count());
+    }
+
+    public function test_an_approved_dossier_can_no_longer_be_reviewed_or_decided_again(): void
+    {
+        $merchant = $this->merchant();
+        $merchant->forceFill(['kyb_status' => 'approved'])->save();
+        $this->upload($merchant->fresh(), 'bank_statement')->assertCreated(); // un remplacement le renvoie en examen
+        User::whereKey($merchant->id)->update(['kyb_status' => 'approved']);
+        $doc = $merchant->merchantDocuments()->firstOrFail();
+        Sanctum::actingAs(User::factory()->superadmin()->create(), ['*']);
+
+        $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/documents/{$doc->id}/approve")->assertStatus(409);
+        $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/approve")->assertStatus(409);
+        $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/reject", ['reason' => 'trop tard'])->assertStatus(409);
+    }
+
     public function test_a_global_rejection_requires_a_reason_and_allows_resubmission(): void
     {
         $merchant = $this->submitted();
@@ -377,6 +444,105 @@ class MerchantKybTest extends TestCase
         // Un marchand n'accède pas à la console admin.
         Sanctum::actingAs($this->merchant(), ['*']);
         $this->getJson("/api/admin/merchants/{$merchant->id}/kyb")->assertForbidden();
+    }
+
+    // ------------------------------------------- Dépôt par l'équipe (pour le marchand)
+
+    private function adminUpload(User $merchant, string $type, array $extra = [], ?UploadedFile $file = null)
+    {
+        return $this->post("/api/admin/merchants/{$merchant->id}/kyb/documents", array_merge(['type' => $type, 'file' => $file ?? $this->file(), 'comment' => 'Reçu par e-mail le 03/10'], $extra), ['Accept' => 'application/json']);
+    }
+
+    public function test_the_team_deposits_a_document_for_the_merchant_traced_and_still_pending(): void
+    {
+        $merchant = $this->merchant();
+        $admin = User::factory()->admin()->create();
+        Sanctum::actingAs($admin, ['*']);
+
+        $res = $this->adminUpload($merchant, 'tax_certificate')->assertCreated();
+
+        $doc = MerchantDocument::firstOrFail();
+        $this->assertSame([$merchant->id, 'pending'], [$doc->user_id, $doc->status]); // à valider ensuite : le dépôt ne vaut pas validation
+        Storage::disk('local')->assertExists($doc->path);
+        $this->assertArrayNotHasKey('path', $res->json('data'));
+
+        $event = MerchantKybEvent::where('action', 'document_uploaded_by_team')->firstOrFail();
+        $this->assertSame([$admin->id, 'tax_certificate', 'Reçu par e-mail le 03/10'], [$event->actor_id, $event->document_type, $event->comment]);
+        $this->assertSame(1, $merchant->notifications()->where('type', KybReviewedNotification::class)->count());
+    }
+
+    public function test_a_justification_is_mandatory_and_files_are_validated_like_the_merchants(): void
+    {
+        $merchant = $this->merchant();
+        Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
+
+        $this->adminUpload($merchant, 'tax_certificate', ['comment' => ''])->assertStatus(422)->assertJsonValidationErrors('comment');
+        $this->adminUpload($merchant, 'inconnu')->assertStatus(422)->assertJsonValidationErrors('type');
+        $this->adminUpload($merchant, 'tax_certificate', [], UploadedFile::fake()->create('x.exe', 10, 'application/octet-stream'))->assertStatus(422)->assertJsonValidationErrors('file');
+        $this->adminUpload($merchant, 'tax_certificate', [], UploadedFile::fake()->create('big.pdf', 6000, 'application/pdf'))->assertStatus(422);
+        $this->assertSame(0, MerchantDocument::count());
+    }
+
+    public function test_the_team_can_deposit_even_while_the_dossier_is_locked_in_review_and_replaces_the_old_file(): void
+    {
+        $merchant = $this->submitted();
+        $old = $merchant->merchantDocuments()->where('type', 'tax_certificate')->firstOrFail();
+        Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
+
+        // Le marchand, lui, est bloqué.
+        Sanctum::actingAs($merchant, ['*']);
+        $this->upload($merchant, 'tax_certificate')->assertStatus(422);
+
+        Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
+        $this->adminUpload($merchant, 'tax_certificate')->assertCreated();
+
+        Storage::disk('local')->assertMissing($old->path);
+        $this->assertSame(1, $merchant->merchantDocuments()->where('type', 'tax_certificate')->count());
+        $this->assertSame('in_review', $merchant->fresh()->kyb_status);
+        $this->assertTrue(MerchantKybEvent::where('action', 'document_replaced_by_team')->exists());
+    }
+
+    public function test_the_team_can_fill_the_profile_and_a_whole_dossier_received_by_email_can_be_approved(): void
+    {
+        $merchant = $this->merchant();
+        $superadmin = User::factory()->superadmin()->create();
+        Sanctum::actingAs($superadmin, ['*']);
+
+        $this->putJson("/api/admin/merchants/{$merchant->id}/kyb/profile", self::PROFILE)->assertStatus(422)->assertJsonValidationErrors('comment');
+        $this->putJson("/api/admin/merchants/{$merchant->id}/kyb/profile", self::PROFILE + ['comment' => 'Saisi d\'après le dossier papier'])->assertOk();
+        $this->assertTrue(MerchantKybEvent::where('action', 'profile_updated_by_team')->where('comment', 'Saisi d\'après le dossier papier')->exists());
+
+        foreach (self::REQUIRED as $type) {
+            $this->adminUpload($merchant, $type, in_array($type, ['legal_rep_id', 'address_proof']) ? ['expires_at' => now()->addYear()->toDateString()] : [])->assertCreated();
+        }
+        foreach ($merchant->merchantDocuments as $doc) {
+            $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/documents/{$doc->id}/approve")->assertOk();
+        }
+
+        $this->getJson("/api/admin/merchants/{$merchant->id}/kyb")->assertJsonPath('data.blockers', []);
+        $this->postJson("/api/admin/merchants/{$merchant->id}/kyb/approve")->assertOk();
+        $this->assertSame('approved', $merchant->fresh()->kyb_status);
+    }
+
+    public function test_deposits_for_a_merchant_need_2fa_and_are_closed_to_everybody_else(): void
+    {
+        $merchant = $this->merchant();
+
+        config(['security.require_admin_2fa' => true]);
+        Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
+        $this->adminUpload($merchant, 'tax_certificate')->assertForbidden()->assertJsonPath('error_code', 'TWO_FACTOR_REQUIRED');
+        $this->putJson("/api/admin/merchants/{$merchant->id}/kyb/profile", self::PROFILE + ['comment' => 'x y z'])->assertForbidden();
+        config(['security.require_admin_2fa' => false]);
+
+        foreach ([User::factory()->create(), User::factory()->agent()->create(), $this->merchant()] as $user) {
+            Sanctum::actingAs($user, ['*']);
+            $this->adminUpload($merchant, 'tax_certificate')->assertForbidden();
+            $this->putJson("/api/admin/merchants/{$merchant->id}/kyb/profile", self::PROFILE + ['comment' => 'x y z'])->assertForbidden();
+        }
+
+        Sanctum::actingAs(User::factory()->admin()->create(), ['*']);
+        $this->adminUpload(User::factory()->create(), 'tax_certificate')->assertNotFound(); // un client n'est pas un marchand
+        $this->assertSame(0, MerchantDocument::count());
     }
 
     // ------------------------------------------------------ Rappels d'échéance

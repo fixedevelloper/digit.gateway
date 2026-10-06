@@ -258,6 +258,9 @@ $registerApiRoutes = function () {
         // Dossier de vérification (KYB) des marchands
         Route::get('/merchants/{id}/kyb', [MerchantKybController::class, 'show'])->whereNumber('id');
         Route::get('/merchants/{id}/kyb/documents/{documentId}/file', [MerchantKybController::class, 'file'])->whereNumber(['id', 'documentId'])->middleware('throttle:60,1');
+        // Saisie pour le compte du marchand (documents reçus hors plateforme) : action sensible → 2FA, justification obligatoire.
+        Route::post('/merchants/{id}/kyb/documents', [MerchantKybController::class, 'uploadDocument'])->whereNumber('id')->middleware(['two_factor', 'throttle:30,60']);
+        Route::put('/merchants/{id}/kyb/profile', [MerchantKybController::class, 'saveProfile'])->whereNumber('id')->middleware('two_factor');
         Route::post('/merchants/{id}/kyb/documents/{documentId}/approve', [MerchantKybController::class, 'approveDocument'])->whereNumber(['id', 'documentId']);
         Route::post('/merchants/{id}/kyb/documents/{documentId}/reject', [MerchantKybController::class, 'rejectDocument'])->whereNumber(['id', 'documentId']);
         // Décision finale : superadmin + 2FA (elle débloque le passage en production).

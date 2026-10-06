@@ -94,6 +94,9 @@ class MerchantKybService
             'grace_until' => $merchant->kyb_grace_until?->toIso8601String(),
             'profile' => $merchant->merchantProfile,
             'profile_complete' => $this->profileComplete($merchant),
+            'submitted' => $merchant->kyb_status !== self::INCOMPLETE && $merchant->kyb_status !== self::REJECTED,
+            // Ce qui empêche l'approbation, en clair (affiché à l'équipe).
+            'blockers' => $this->blockers($merchant),
             'can_submit' => $this->readyToSubmit($merchant) && in_array($merchant->kyb_status, [self::INCOMPLETE, self::REJECTED], true),
             'documents' => collect($this->documentTypes())->map(fn ($def, $type) => [
                 'type' => $type,
@@ -106,12 +109,43 @@ class MerchantKybService
         ];
     }
 
-    public function saveProfile(User $merchant, array $data): MerchantProfile
+    /** @return array<int, string> raisons pour lesquelles le dossier ne peut pas encore être approuvé */
+    public function blockers(User $merchant): array
     {
-        $this->assertEditable($merchant);
+        $blockers = [];
+
+        if (! $this->profileComplete($merchant)) {
+            $blockers[] = 'Informations d\'entreprise non renseignées ou incomplètes';
+        }
+
+        $docs = $merchant->merchantDocuments()->get()->keyBy('type');
+
+        foreach ($this->requiredTypes() as $type) {
+            $label = $this->documentTypes()[$type]['label'];
+            $doc = $docs->get($type);
+
+            $blockers[] = match (true) {
+                ! $doc => "Pièce manquante : {$label}",
+                $doc->isExpired() => "Pièce expirée : {$label}",
+                $doc->status === MerchantDocument::REJECTED => "Pièce refusée : {$label}",
+                $doc->status === MerchantDocument::PENDING => "Pièce à valider : {$label}",
+                default => null,
+            };
+        }
+
+        return array_values(array_filter($blockers));
+    }
+
+    /**
+     * @param  User|null  $teamMember  admin qui saisit les informations POUR le marchand (dossier reçu hors plateforme) ;
+     *                                 il n'est alors pas bloqué par le verrouillage « en examen » et doit justifier sa saisie.
+     */
+    public function saveProfile(User $merchant, array $data, ?User $teamMember = null, ?string $comment = null): MerchantProfile
+    {
+        $teamMember ?: $this->assertEditable($merchant);
 
         $profile = MerchantProfile::updateOrCreate(['user_id' => $merchant->id], $data);
-        $this->log($merchant, $merchant, 'profile_updated');
+        $this->log($merchant, $teamMember ?? $merchant, $teamMember ? 'profile_updated_by_team' : 'profile_updated', null, $comment);
 
         return $profile;
     }
@@ -122,13 +156,15 @@ class MerchantKybService
      *
      * @throws InvalidArgumentException
      */
-    public function upload(User $merchant, string $type, UploadedFile $file, ?string $expiresAt = null): MerchantDocument
+    public function upload(User $merchant, string $type, UploadedFile $file, ?string $expiresAt = null, ?User $teamMember = null, ?string $comment = null): MerchantDocument
     {
         if (! array_key_exists($type, $this->documentTypes())) {
             throw new InvalidArgumentException('Type de pièce inconnu.');
         }
 
-        $this->assertEditable($merchant);
+        // Dépôt par l'équipe pour le compte du marchand : pas de verrouillage « en examen », mais une justification
+        // (origine de la pièce) est conservée dans le journal, et la pièce reste « en attente » de validation.
+        $teamMember ?: $this->assertEditable($merchant);
 
         $disk = config('kyb.disk');
         $extension = strtolower($file->guessExtension() ?: $file->getClientOriginalExtension());
@@ -165,7 +201,12 @@ class MerchantKybService
             return $document;
         });
 
-        $this->log($merchant, $merchant, $replaced ? 'document_replaced' : 'document_uploaded', $type);
+        $action = ($replaced ? 'document_replaced' : 'document_uploaded').($teamMember ? '_by_team' : '');
+        $this->log($merchant, $teamMember ?? $merchant, $action, $type, $comment);
+
+        if ($teamMember) {
+            $merchant->notify(new KybReviewedNotification('added_by_team', $this->documentTypes()[$type]['label']));
+        }
 
         return $document;
     }
@@ -188,8 +229,9 @@ class MerchantKybService
     {
         $merchant = $document->user;
 
-        if ($merchant->kyb_status !== self::IN_REVIEW) {
-            throw new InvalidArgumentException('Le dossier n\'est pas en cours d\'examen.');
+        // L'équipe peut examiner une pièce dès qu'elle est déposée, sans attendre la soumission du dossier.
+        if ($merchant->kyb_status === self::APPROVED) {
+            throw new InvalidArgumentException('Le dossier est déjà approuvé.');
         }
 
         $document->update([
@@ -201,7 +243,7 @@ class MerchantKybService
 
         $this->log($merchant, $admin, $approve ? 'document_approved' : 'document_rejected', $document->type, $reason);
 
-        // Une pièce refusée renvoie le dossier au marchand pour correction.
+        // Une pièce refusée renvoie le dossier au marchand pour correction (même s'il n'était pas encore soumis).
         if (! $approve) {
             $this->setStatus($merchant, self::INCOMPLETE, null);
             $merchant->notify(new KybReviewedNotification('document_rejected', $this->documentTypes()[$document->type]['label'], $reason));
@@ -213,12 +255,12 @@ class MerchantKybService
     /** @throws InvalidArgumentException */
     public function approveDossier(User $merchant, User $admin): void
     {
-        if ($merchant->kyb_status !== self::IN_REVIEW) {
-            throw new InvalidArgumentException('Le dossier n\'est pas en cours d\'examen.');
+        if ($merchant->kyb_status === self::APPROVED) {
+            throw new InvalidArgumentException('Le dossier est déjà approuvé.');
         }
 
         if (! $this->profileComplete($merchant) || $this->missingOrInvalid($merchant, requireApproved: true) !== []) {
-            throw new InvalidArgumentException('Toutes les pièces obligatoires doivent être approuvées et non expirées.');
+            throw new InvalidArgumentException('Pour approuver : informations d\'entreprise complètes et toutes les pièces obligatoires validées et non expirées.');
         }
 
         $this->setStatus($merchant, self::APPROVED, null);
@@ -230,8 +272,8 @@ class MerchantKybService
     /** @throws InvalidArgumentException */
     public function rejectDossier(User $merchant, User $admin, string $reason): void
     {
-        if ($merchant->kyb_status !== self::IN_REVIEW) {
-            throw new InvalidArgumentException('Le dossier n\'est pas en cours d\'examen.');
+        if ($merchant->kyb_status === self::APPROVED) {
+            throw new InvalidArgumentException('Le dossier est déjà approuvé.');
         }
 
         $this->setStatus($merchant, self::REJECTED, $reason);

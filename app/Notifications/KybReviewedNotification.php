@@ -32,12 +32,15 @@ class KybReviewedNotification extends Notification implements ShouldQueue
         $mail = (new MailMessage)
             ->subject(match ($this->outcome) {
                 'approved' => 'Votre dossier est approuvé',
+                'added_by_team' => 'Une pièce a été ajoutée à votre dossier',
                 'document_rejected' => 'Une pièce de votre dossier a été refusée',
                 default => 'Votre dossier de vérification a été refusé',
             })
             ->greeting('Bonjour '.($notifiable->name ?: $notifiable->company_name ?: '').',');
 
         match ($this->outcome) {
+            'added_by_team' => $mail->line("Notre équipe a ajouté la pièce « {$this->document} » à votre dossier de vérification, à partir des documents que vous nous avez transmis.")
+                ->line('Elle va maintenant être examinée. Vous pouvez consulter votre dossier depuis votre portail.'),
             'approved' => $mail->line('Bonne nouvelle : votre dossier de vérification est approuvé.')
                 ->line('Notre équipe peut maintenant activer votre compte en production ; vous serez prévenu dès que ce sera fait.'),
             'document_rejected' => $mail->line("La pièce « {$this->document} » n'a pas pu être validée.")
@@ -50,7 +53,7 @@ class KybReviewedNotification extends Notification implements ShouldQueue
 
         $link = config('app.frontend_url');
 
-        if ($this->outcome !== 'approved' && $link) {
+        if (! in_array($this->outcome, ['approved'], true) && $link) {
             $mail->action('Ouvrir mon dossier', rtrim($link, '/').'/portal/dashboard/kyb');
         }
 
@@ -64,6 +67,7 @@ class KybReviewedNotification extends Notification implements ShouldQueue
             'outcome' => $this->outcome,
             'message' => match ($this->outcome) {
                 'approved' => 'Votre dossier est approuvé : votre compte peut maintenant être activé en production.',
+                'added_by_team' => "Notre équipe a ajouté la pièce « {$this->document} » à votre dossier : elle va être examinée.",
                 'document_rejected' => "La pièce « {$this->document} » a été refusée : {$this->reason}. Déposez-en une nouvelle puis soumettez à nouveau votre dossier.",
                 default => "Votre dossier a été refusé : {$this->reason}. Corrigez-le puis soumettez-le à nouveau.",
             },
