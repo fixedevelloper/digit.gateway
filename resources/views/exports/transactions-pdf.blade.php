@@ -31,6 +31,7 @@
             <th>Référence</th>
             <th>Type</th>
             <th>Opérateur</th>
+            <th>Expéditeur</th>
             <th>Bénéficiaire</th>
             <th>Téléphone</th>
             <th>Montant</th>
@@ -45,6 +46,12 @@
                 <td>{{ $tx->reference }}</td>
                 <td>{{ $tx->type }}</td>
                 <td>{{ $tx->recipient_operator }}</td>
+                <td>
+                    {{ $tx->user?->name ?: '—' }}
+                    @if($tx->user && ($tx->user->role === 'merchant' || $tx->channel === 'merchant_api'))
+                        (Marchand)
+                    @endif
+                </td>
                 <td>{{ $tx->recipient_name ?: 'Utilisateur Externe' }}</td>
                 <td>{{ $tx->recipient_phone }}</td>
                 <td class="amount">{{ number_format((float) $tx->amount_sent, 0, ',', ' ') }} {{ $tx->currency_sent }}</td>

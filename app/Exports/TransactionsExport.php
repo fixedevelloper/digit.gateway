@@ -52,7 +52,9 @@ class TransactionsExport implements FromCollection, WithHeadings, WithMapping, S
             $transaction->gateway_reference,
             $transaction->type,
             $transaction->recipient_operator,
-            $transaction->user?->name,
+            $transaction->user
+                ? $transaction->user->name . ($transaction->user->role === 'merchant' || $transaction->channel === 'merchant_api' ? ' (Marchand)' : '')
+                : null,
             $transaction->recipient_name,
             $transaction->recipient_phone,
             (float) $transaction->amount_sent,
