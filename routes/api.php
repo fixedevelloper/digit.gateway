@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Admin\AgentController;
 use App\Http\Controllers\Api\Admin\BankFieldRuleController;
 use App\Http\Controllers\Api\Admin\CountryServiceController;
 use App\Http\Controllers\Api\Admin\FeeRuleController;
+use App\Http\Controllers\Api\Admin\MerchantPricingController;
 use App\Http\Controllers\Api\Admin\ProviderController;
 use App\Http\Controllers\Api\Admin\TransferController as AdminTransferController;
 use App\Http\Controllers\Api\Admin\DashboardController;
@@ -254,6 +255,11 @@ $registerApiRoutes = function () {
         Route::put('/merchants/{id}', [MerchantController::class, 'update'])->middleware('two_factor');
         Route::get('/merchants/{id}/transactions', [MerchantController::class, 'transactions'])->whereNumber('id');
         Route::get('/merchants/{id}/transactions/export', [MerchantController::class, 'exportTransactions'])->whereNumber('id')->middleware('throttle:10,1');
+
+        // Tarifs du marchand par opérateur (frais, pourcentage, taux saisi à la main)
+        Route::get('/merchants/{id}/pricing', [MerchantPricingController::class, 'index'])->whereNumber('id');
+        Route::put('/merchants/{id}/pricing/{operatorId}', [MerchantPricingController::class, 'upsert'])->whereNumber(['id', 'operatorId'])->middleware('two_factor');
+        Route::delete('/merchants/{id}/pricing/{operatorId}', [MerchantPricingController::class, 'destroy'])->whereNumber(['id', 'operatorId'])->middleware('two_factor');
 
         // Dossier de vérification (KYB) des marchands
         Route::get('/merchants/{id}/kyb', [MerchantKybController::class, 'show'])->whereNumber('id');

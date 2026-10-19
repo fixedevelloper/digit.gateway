@@ -93,6 +93,9 @@ class KycTest extends TestCase
         $merchant = User::factory()->merchant()->create(['transaction_pin' => Hash::make('1234')]);
         $merchant->wallet()->update(['balance' => 100000]);
         $merchant->forceFill(['kyc_level' => 1])->save();
+        foreach (\App\Models\Operator::all() as $op) {
+            \App\Models\MerchantPricing::create(['merchant_id' => $merchant->id, 'operator_id' => $op->id, 'fixed_fee' => $op->fixed_fee, 'percent_fee' => $op->percent_fee]);
+        }
         Sanctum::actingAs($merchant->fresh(), ['*']);
         $this->transfer(3000)->assertOk();
     }

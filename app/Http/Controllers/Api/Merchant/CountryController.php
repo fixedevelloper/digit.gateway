@@ -5,7 +5,10 @@ namespace App\Http\Controllers\Api\Merchant;
 use App\Http\Controllers\Controller;
 use App\Models\Country;
 use Dedoc\Scramble\Attributes\Group;
+use App\Models\MerchantPricing;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 /**
  * Pays et opérateurs disponibles pour l'API gateway B2B. Contrat allégé par
@@ -22,7 +25,7 @@ class CountryController extends Controller
      * Retourne les pays actifs avec leurs opérateurs mobile money actifs et leurs
      * conditions (bornes de montant, frais).
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $countries = Country::where('status', true)
             ->with(['operators' => function ($query) {
@@ -33,7 +36,7 @@ class CountryController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'data' => $countries->map(fn (Country $country) => $this->formatCountry($country)),
+            'data' => $countries->map(fn (Country $country) => $this->formatCountry($country, $this->pricingFor($request))),
         ], 200);
     }
 
@@ -42,7 +45,7 @@ class CountryController extends Controller
      *
      * Récupère un pays spécifique via son code ISO (ex: CM, CI, SN).
      */
-    public function show(string $iso): JsonResponse
+    public function show(Request $request, string $iso): JsonResponse
     {
         $country = Country::where('iso', strtoupper($iso))
             ->with(['operators' => function ($query) {
@@ -60,11 +63,17 @@ class CountryController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'data' => $this->formatCountry($country),
+            'data' => $this->formatCountry($country, $this->pricingFor($request)),
         ], 200);
     }
 
-    private function formatCountry(Country $country): array
+    /** Tarifs du marchand authentifié, indexés par opérateur. */
+    private function pricingFor(Request $request): Collection
+    {
+        return MerchantPricing::where('merchant_id', $request->user()->id)->where('active', true)->get()->keyBy('operator_id');
+    }
+
+    private function formatCountry(Country $country, Collection $pricing): array
     {
         return [
             'name' => $country->name,
@@ -72,6 +81,8 @@ class CountryController extends Controller
             'currency' => $country->currency,
             'phonecode' => $country->phonecode,
             'carriers' => $country->operators->map(fn ($operator) => [
+                // false ⇒ aucun tarif configuré pour ce compte : l'opérateur est refusé (PRICING_NOT_CONFIGURED).
+                'available' => $pricing->has($operator->id),
                 'id' => $operator->id,
                 'code' => $operator->code,
                 'name' => $operator->name,
@@ -80,8 +91,9 @@ class CountryController extends Controller
                 'currency' => $operator->currency,
                 'min_amount' => (float) $operator->min_amount,
                 'max_amount' => (float) $operator->max_amount,
-                'fixed_fee' => (float) $operator->fixed_fee,
-                'percent_fee' => (float) $operator->percent_fee,
+                'fixed_fee' => $pricing->has($operator->id) ? $pricing[$operator->id]->fixed_fee : null,
+                'percent_fee' => $pricing->has($operator->id) ? $pricing[$operator->id]->percent_fee : null,
+                'rate' => $pricing->has($operator->id) ? $pricing[$operator->id]->rate : null,
             ]),
         ];
     }

@@ -7,6 +7,7 @@ use App\Jobs\ProcessTransferJob;
 use App\Jobs\SimulateSandboxTransactionJob;
 use App\Models\ApiKey;
 use App\Models\Country;
+use App\Models\MerchantPricing;
 use App\Models\Operator;
 use App\Models\Transaction;
 use App\Models\User;
@@ -57,6 +58,9 @@ class MerchantSandboxTest extends TestCase
     {
         $merchant = User::factory()->merchant()->create(['environment' => $environment]);
         $merchant->wallet()->update(['balance' => 5000, 'sandbox_balance' => 20000]);
+        foreach (Operator::all() as $op) {
+            MerchantPricing::create(['merchant_id' => $merchant->id, 'operator_id' => $op->id, 'fixed_fee' => $op->fixed_fee, 'percent_fee' => $op->percent_fee]);
+        }
 
         return $merchant;
     }

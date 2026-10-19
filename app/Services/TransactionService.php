@@ -15,6 +15,7 @@ use App\Models\Country;
 use App\Services\Banking\ManualBankTransferProvider;
 use App\Models\CountryService;
 use App\Models\Operator;
+use App\Models\MerchantPricing;
 use App\Models\Quote;
 use App\Models\Transaction;
 use App\Models\User;
@@ -139,9 +140,41 @@ class TransactionService
      * Calcule le frais réel configuré pour l'opérateur (frais fixe + pourcentage du montant),
      * dans la devise de l'opérateur.
      */
-    private function computeFee(Operator $operator, float $amount): float
+    private function computeFee(Operator $operator, float $amount, ?MerchantPricing $pricing = null): float
     {
-        return round((float) $operator->fixed_fee + ($amount * (float) $operator->percent_fee), 2);
+        $fixed = $pricing ? $pricing->fixed_fee : (float) $operator->fixed_fee;
+        $percent = $pricing ? $pricing->percent_fee : (float) $operator->percent_fee;
+
+        return round($fixed + ($amount * $percent), 2);
+    }
+
+    /**
+     * Tarif propre à un marchand pour cet opérateur (frais + taux). Un marchand n'utilise jamais les frais
+     * de l'opérateur ni le taux global (réservés aux clients de l'app) : sans tarif actif, l'opération est refusée.
+     * Retourne null pour un client de l'app.
+     *
+     * @throws TransactionValidationException
+     */
+    private function merchantPricing(User $user, Operator $operator): ?MerchantPricing
+    {
+        if ($user->role !== 'merchant') {
+            return null;
+        }
+
+        $pricing = MerchantPricing::where('merchant_id', $user->id)
+            ->where('operator_id', $operator->id)
+            ->where('active', true)
+            ->first();
+
+        if (! $pricing) {
+            throw TransactionValidationException::make(
+                'PRICING_NOT_CONFIGURED',
+                'carrier',
+                "Aucun tarif n'est configuré pour votre compte sur l'opérateur « {$operator->name} ». Contactez le support."
+            );
+        }
+
+        return $pricing;
     }
 
     /**
@@ -154,11 +187,13 @@ class TransactionService
      *
      * @return array{amount: float, fee: float, total: float, currency: string, converted_amount: float, converted_fee: float, converted_currency: string, rate: float}
      */
-    private function price(Operator $operator, string $walletCurrency, float $amount, string $type): array
+    private function price(Operator $operator, string $walletCurrency, float $amount, string $type, ?User $user = null): array
     {
+        $merchantPricing = $user ? $this->merchantPricing($user, $operator) : null;
+
         if ($operator->currency === $walletCurrency) {
             $this->assertWithinBounds($operator, $amount);
-            $fee = $this->computeFee($operator, $amount);
+            $fee = $this->computeFee($operator, $amount, $merchantPricing);
 
             return [
                 'amount' => $amount,
@@ -172,7 +207,18 @@ class TransactionService
             ];
         }
 
-        $rate = $this->exchangeRates->rate($operator->currency, $walletCurrency);
+        if ($merchantPricing) {
+            if (! $merchantPricing->rate || $merchantPricing->rate <= 0) {
+                throw TransactionValidationException::make(
+                    'PRICING_NOT_CONFIGURED',
+                    'carrier',
+                    "Aucun taux n'est configuré pour votre compte sur l'opérateur « {$operator->name} ». Contactez le support."
+                );
+            }
+            $rate = $merchantPricing->rate;
+        } else {
+            $rate = $this->exchangeRates->rate($operator->currency, $walletCurrency);
+        }
 
         // Montant versé (transfert/retrait) : arrondi inférieur, on ne verse jamais plus
         // que la contre-valeur payée. Montant encaissé (dépôt) : arrondi supérieur.
@@ -182,7 +228,7 @@ class TransactionService
 
         $this->assertWithinBounds($operator, $converted);
 
-        $convertedFee = $this->computeFee($operator, $converted);
+        $convertedFee = $this->computeFee($operator, $converted, $merchantPricing);
         $fee = $this->exchangeRates->ceil($convertedFee * $rate, $walletCurrency);
 
         return [
@@ -209,7 +255,7 @@ class TransactionService
     public function createQuote(User $user, array $data, string $type): Quote
     {
         $operator = $this->resolveOperator($data);
-        $pricing = $this->price($operator, $user->wallet->currency, (float) $data['amount'], $type);
+        $pricing = $this->price($operator, $user->wallet->currency, (float) $data['amount'], $type, $user);
 
         return Quote::create(array_merge($pricing, [
             'user_id' => $user->id,
@@ -251,7 +297,7 @@ class TransactionService
             );
         }
 
-        return ['operator' => $operator, 'pricing' => $this->price($operator, $walletCurrency, $amount, $type), 'quote' => null];
+        return ['operator' => $operator, 'pricing' => $this->price($operator, $walletCurrency, $amount, $type, $user), 'quote' => null];
     }
 
     /**

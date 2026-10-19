@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\ApiKey;
 use App\Models\Country;
+use App\Models\MerchantPricing;
 use App\Models\Operator;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -46,7 +47,18 @@ abstract class MerchantApiTestCase extends TestCase
         $merchant = User::factory()->merchant()->create(['environment' => $environment]);
         $merchant->wallet()->update(['balance' => $balance, 'sandbox_balance' => $sandbox]);
 
+        $this->priceFor($merchant, $this->operator);
+
         return $merchant->fresh();
+    }
+
+    /** Tarif marchand (obligatoire pour opérer) ; par défaut les mêmes frais que l'opérateur. */
+    protected function priceFor(User $merchant, Operator $operator, array $overrides = []): MerchantPricing
+    {
+        return MerchantPricing::updateOrCreate(
+            ['merchant_id' => $merchant->id, 'operator_id' => $operator->id],
+            $overrides + ['fixed_fee' => $operator->fixed_fee, 'percent_fee' => $operator->percent_fee, 'rate' => null, 'active' => true],
+        );
     }
 
     /** @return array{0: ApiKey, 1: string} */

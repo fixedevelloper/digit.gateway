@@ -358,6 +358,8 @@ class CurrencyConversionTest extends TestCase
         Queue::fake();
         $merchant = User::factory()->merchant()->create(['environment' => 'production']);
         $merchant->wallet()->update(['balance' => 20000]);
+        // Tarif du marchand : taux saisi à la main, sans frais.
+        \App\Models\MerchantPricing::create(['merchant_id' => $merchant->id, 'operator_id' => $this->usdOperator->id, 'fixed_fee' => 0, 'percent_fee' => 0, 'rate' => 600]);
         $key = ApiKey::generateFor($merchant, 'test', 'production', ['transfer.write'])['plainTextKey'];
         $headers = ['Authorization' => 'Bearer '.$key];
 

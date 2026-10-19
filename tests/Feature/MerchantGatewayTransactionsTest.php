@@ -49,6 +49,7 @@ class MerchantGatewayTransactionsTest extends MerchantApiTestCase
         $this->assertEquals([
             'id' => $this->operator->id, 'code' => 'MTN_CM', 'name' => 'MTN Cameroun', 'currency' => 'XAF',
             'min_amount' => 100, 'max_amount' => 100000, 'fixed_fee' => 50, 'percent_fee' => 0.01,
+            'available' => true, 'rate' => null,
         ], $res->json('data.0.carriers.0'));
     }
 
@@ -72,6 +73,7 @@ class MerchantGatewayTransactionsTest extends MerchantApiTestCase
         ]);
         ExchangeRate::create(['base_currency' => 'USD', 'quote_currency' => 'XAF', 'rate' => 600]);
         [$merchant, $plain] = $this->live();
+        $this->priceFor($merchant, $usd, ['rate' => 600]);
 
         $quote = $this->postJson('/api/v1/gateway/quotes', [
             'type' => 'transfer', 'country' => 'CM', 'carrier' => 'USD_OP', 'amount' => 10000,
